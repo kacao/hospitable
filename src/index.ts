@@ -22,3 +22,5 @@ export type { PageFetcher } from './http/paginate'
 
 export { PropertiesResource } from './resources'
 export type { PropertyListParams } from './resources'
+
+export { ReservationsResource } from './resources'
