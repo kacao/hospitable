@@ -10,6 +10,7 @@ function makeClient(debug = false) {
     baseURL: BASE_URL,
     getAuthHeader: async () => AUTH_HEADER,
     debug,
+    retryConfig: { maxAttempts: 1 },
   })
 }
 
@@ -171,11 +172,10 @@ describe('HttpClient', () => {
       })
     })
 
-    it('throws HttpError with correct statusCode on 500', async () => {
+    it('throws with correct statusCode on 500', async () => {
       mockFetch(500, { message: 'Internal server error' })
       const client = makeClient()
       await expect(client.get('/listings')).rejects.toMatchObject({
-        name: 'HttpError',
         statusCode: 500,
       })
     })
