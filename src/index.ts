@@ -1,5 +1,7 @@
-// Main entry point — exports added as modules are implemented
 export const VERSION = '0.1.0'
+
+export { HospitableClient } from './client'
+export type { HospitableClientConfig } from './client'
 
 export {
   HospitableError,
