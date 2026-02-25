@@ -12,6 +12,7 @@
       "require": "./dist/index.cjs"
     }
   },
+  "type": "module",
   "files": ["dist"],
   "scripts": {
     "build": "tsup",
