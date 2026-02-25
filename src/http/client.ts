@@ -1,4 +1,5 @@
 import { VERSION } from '../index'
+import { withRetry, type RetryConfig } from './retry'
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
@@ -13,6 +14,7 @@ export interface HttpClientConfig {
   baseURL: string
   getAuthHeader: () => Promise<string>
   debug?: boolean
+  retryConfig?: RetryConfig
 }
 
 // NOTE: We inline error creation here to avoid circular dep — the real errors
@@ -51,45 +53,52 @@ export class HttpClient {
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const { method = 'GET', params, body, headers: extraHeaders = {} } = options
-    const authHeader = await this.config.getAuthHeader()
     const url = buildURL(this.config.baseURL, path, params)
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: authHeader,
-      'User-Agent': `hospitable-ts/${VERSION}`,
-      ...extraHeaders,
-    }
+    return withRetry(
+      async () => {
+        const authHeader = await this.config.getAuthHeader()
 
-    if (this.config.debug) {
-      console.debug(`[hospitable] ${method} ${url}`)
-    }
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: authHeader,
+          'User-Agent': `hospitable-ts/${VERSION}`,
+          ...extraHeaders,
+        }
 
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    })
+        if (this.config.debug) {
+          console.debug(`[hospitable] ${method} ${url}`)
+        }
 
-    const requestId = response.headers.get('x-request-id') ?? undefined
+        const response = await fetch(url, {
+          method,
+          headers,
+          body: body !== undefined ? JSON.stringify(body) : undefined,
+        })
 
-    if (!response.ok) {
-      let errorBody: Record<string, unknown> = {}
-      try {
-        errorBody = (await response.json()) as Record<string, unknown>
-      } catch {
-        // ignore parse errors
-      }
-      const message = (errorBody['message'] as string | undefined) ?? `HTTP ${response.status}`
-      throw new HttpError(response.status, message, requestId, errorBody)
-    }
+        const requestId = response.headers.get('x-request-id') ?? undefined
 
-    if (response.status === 204) {
-      return undefined as T
-    }
+        if (!response.ok) {
+          let errorBody: Record<string, unknown> = {}
+          try {
+            errorBody = (await response.json()) as Record<string, unknown>
+          } catch {
+            // ignore parse errors
+          }
+          const message = (errorBody['message'] as string | undefined) ?? `HTTP ${response.status}`
+          throw new HttpError(response.status, message, requestId, errorBody)
+        }
 
-    return response.json() as Promise<T>
+        if (response.status === 204) {
+          return undefined as T
+        }
+
+        return response.json() as Promise<T>
+      },
+      url,
+      this.config.retryConfig,
+    )
   }
 
   get<T>(path: string, params?: RequestOptions['params']): Promise<T> {
