@@ -6,3 +6,5 @@ export { ReservationsResource } from './reservations'
 export { MessagesResource } from './messages'
 
 export { CalendarResource } from './calendar'
+
+export { ReviewsResource } from './reviews'

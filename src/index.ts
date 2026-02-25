@@ -31,4 +31,6 @@ export { MessagesResource } from './resources'
 
 export { CalendarResource } from './resources'
 
+export { ReviewsResource } from './resources'
+
 export { sanitize } from './utils'
