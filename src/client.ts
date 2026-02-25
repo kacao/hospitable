@@ -4,6 +4,7 @@ import { HttpClient } from './http/client'
 import type { RetryConfig } from './http/retry'
 import { PropertiesResource } from './resources/properties'
 import { ReservationsResource } from './resources/reservations'
+import { ReviewsResource } from './resources/reviews'
 
 export interface HospitableClientConfig {
   /** Personal Access Token. Also read from HOSPITABLE_PAT env var. */
@@ -25,6 +26,7 @@ export interface HospitableClientConfig {
 export class HospitableClient {
   readonly properties: PropertiesResource
   readonly reservations: ReservationsResource
+  readonly reviews: ReviewsResource
 
   constructor(config: HospitableClientConfig = {}) {
     const baseURL = config.baseURL ?? 'https://api.hospitable.com'
@@ -48,5 +50,6 @@ export class HospitableClient {
 
     this.properties = new PropertiesResource(httpClient)
     this.reservations = new ReservationsResource(httpClient)
+    this.reviews = new ReviewsResource(httpClient)
   }
 }
