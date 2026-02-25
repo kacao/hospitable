@@ -24,3 +24,5 @@ export { PropertiesResource } from './resources'
 export type { PropertyListParams } from './resources'
 
 export { ReservationsResource } from './resources'
+
+export { MessagesResource } from './resources'
