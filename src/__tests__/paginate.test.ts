@@ -95,6 +95,24 @@ describe('paginate', () => {
     expect(fetcher).toHaveBeenNthCalledWith(1, expect.objectContaining({ cursor: undefined }))
     expect(fetcher).toHaveBeenNthCalledWith(2, expect.objectContaining({ cursor: 'page2cursor' }))
   })
+
+  it('paginate() propagates fetcher rejection to the async iterator consumer', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce({
+        data: [1, 2],
+        meta: { nextCursor: 'cursor-2', total: 4, perPage: 2 }
+      })
+      .mockRejectedValueOnce(new Error('Network failure'))
+
+    const collected: number[] = []
+    await expect(async () => {
+      for await (const item of paginate(fetcher, {})) {
+        collected.push(item)
+      }
+    }).rejects.toThrow('Network failure')
+
+    expect(collected).toEqual([1, 2]) // first page was yielded before error
+  })
 })
 
 describe('collectAll', () => {
@@ -107,5 +125,16 @@ describe('collectAll', () => {
     const result = await collectAll<number, TestParams>(fetcher, {})
     expect(result).toEqual([1, 2, 3, 4, 5])
     expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+
+  it('collectAll() rejects when fetcher throws mid-way', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce({
+        data: [1, 2],
+        meta: { nextCursor: 'cursor-2', total: 4, perPage: 2 }
+      })
+      .mockRejectedValueOnce(new Error('API down'))
+
+    await expect(collectAll(fetcher, {})).rejects.toThrow('API down')
   })
 })
