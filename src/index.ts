@@ -32,3 +32,5 @@ export { MessagesResource } from './resources'
 export { CalendarResource } from './resources'
 
 export { sanitize } from './utils'
+
+export { ReservationFilter, PropertyFilter } from './filters'
