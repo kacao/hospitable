@@ -1,5 +1,6 @@
 import { VERSION } from '../index'
 import { withRetry, type RetryConfig } from './retry'
+import { sanitize } from '../utils/sanitize'
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
@@ -69,6 +70,9 @@ export class HttpClient {
 
         if (this.config.debug) {
           console.debug(`[hospitable] ${method} ${url}`)
+          if (body !== undefined) {
+            console.debug('[hospitable] body:', sanitize(body))
+          }
         }
 
         const response = await fetch(url, {
@@ -87,6 +91,9 @@ export class HttpClient {
             // ignore parse errors
           }
           const message = (errorBody['message'] as string | undefined) ?? `HTTP ${response.status}`
+          if (this.config.debug) {
+            console.debug('[hospitable] error body:', sanitize(errorBody))
+          }
           throw new HttpError(response.status, message, requestId, errorBody)
         }
 
