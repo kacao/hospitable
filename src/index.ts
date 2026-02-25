@@ -16,3 +16,6 @@ export * from './models/index'
 
 export { TokenManager } from './auth'
 export type { TokenManagerConfig } from './auth'
+
+export { paginate, collectAll } from './http/paginate'
+export type { PageFetcher } from './http/paginate'
