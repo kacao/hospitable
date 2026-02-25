@@ -11,3 +11,5 @@ export {
   ServerError,
   createErrorFromResponse,
 } from './errors'
+
+export * from './models/index'
