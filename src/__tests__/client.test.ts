@@ -62,4 +62,20 @@ describe('HospitableClient', () => {
   it('constructor with no args does not throw', () => {
     expect(() => new HospitableClient()).not.toThrow()
   })
+
+  it('accepts all OAuth2 config fields without error', () => {
+    expect(() => new HospitableClient({
+      token: 'access',
+      refreshToken: 'refresh',
+      clientId: 'cid',
+      clientSecret: 'csecret',
+      retry: { maxAttempts: 3 },
+      debug: false,
+    })).not.toThrow()
+  })
+
+  it('exposes reviews resource', () => {
+    const client = new HospitableClient({ token: 'pat123' })
+    expect(client.reviews).toBeDefined()
+  })
 })

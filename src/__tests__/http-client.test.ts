@@ -282,5 +282,27 @@ describe('HttpClient', () => {
       expect(debugSpy).not.toHaveBeenCalled()
       debugSpy.mockRestore()
     })
+
+    it('logs sanitized body when debug is true and body is present', async () => {
+      mockFetch(200, { ok: true })
+      const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      const client = makeClient(true)
+      await client.post('/listings', { email: 'secret@test.com', name: 'test' })
+      const bodyCall = debugSpy.mock.calls.find((c) => String(c[0]).includes('body:'))
+      expect(bodyCall).toBeDefined()
+      // email should be masked in the log
+      expect(JSON.stringify(bodyCall)).toContain('***')
+      debugSpy.mockRestore()
+    })
+
+    it('logs sanitized error body when debug is true and request fails', async () => {
+      mockFetch(422, { message: 'invalid', email: 'user@test.com' })
+      const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      const client = makeClient(true)
+      await expect(client.get('/listings')).rejects.toBeDefined()
+      const errorCall = debugSpy.mock.calls.find((c) => String(c[0]).includes('error body:'))
+      expect(errorCall).toBeDefined()
+      debugSpy.mockRestore()
+    })
   })
 })

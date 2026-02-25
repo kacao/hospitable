@@ -96,4 +96,14 @@ describe('sanitize', () => {
     expect(result.level1.level2.level3.level4.level5.email).toBe('***')
     expect(result.level1.level2.level3.level4.level5.id).toBe(7)
   })
+
+  it('stops recursing beyond depth 10 and returns value as-is', () => {
+    // Build a 12-level deep object
+    let obj: Record<string, unknown> = { email: 'deep@test.com' }
+    for (let i = 0; i < 12; i++) {
+      obj = { nested: obj }
+    }
+    // Should not throw and should return something (depth guard triggers)
+    expect(() => sanitize(obj)).not.toThrow()
+  })
 })

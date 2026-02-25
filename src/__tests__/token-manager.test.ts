@@ -262,6 +262,25 @@ describe('TokenManager', () => {
     })
   })
 
+  describe('failed refresh', () => {
+    it('throws when token endpoint returns non-ok response', async () => {
+      const mockFetch = makeFetchMock({
+        ok: false,
+        status: 401,
+        text: () => Promise.resolve('Unauthorized'),
+      })
+      vi.stubGlobal('fetch', mockFetch)
+
+      const tm = new TokenManager({
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        baseURL: 'https://api.hospitable.com',
+      })
+
+      await expect(tm.getAuthHeader()).rejects.toThrow('Token refresh failed (401): Unauthorized')
+    })
+  })
+
   describe('environment variable fallback', () => {
     it('9. uses HOSPITABLE_PAT env var when no token provided', async () => {
       const mockFetch = makeFetchMock({ ok: true })

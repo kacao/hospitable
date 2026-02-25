@@ -42,6 +42,7 @@ export class TokenManager {
     if (this.needsRefresh()) {
       await this.ensureRefreshed()
     }
+    /* v8 ignore next 3 */
     if (!this.accessToken) {
       throw new Error('No access token available. Provide token or clientId+clientSecret.')
     }

@@ -154,4 +154,49 @@ describe('withRetry', () => {
 
     expect(delay1).not.toBe(delay2)
   })
+
+  it('immediately re-throws non-Error errors without statusCode', async () => {
+    const fn = vi.fn().mockRejectedValue('plain string error')
+    await expect(withRetry(fn, '/test')).rejects.toBe('plain string error')
+    expect(fn).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses jittered delay (not retryAfter) when 429 error has no retryAfter property', async () => {
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(new FakeHttpError(429, 'Rate limited')) // no retryAfter → undefined
+      .mockResolvedValueOnce({ ok: true })
+
+    const promise = withRetry(fn, '/test', { baseDelay: 100, maxDelay: 1000 })
+    await vi.runAllTimersAsync()
+    const result = await promise
+    expect(result).toEqual({ ok: true })
+    expect(fn).toHaveBeenCalledTimes(2)
+  })
+
+  it('throws ServerError wrapping a non-Error last error', async () => {
+    // An object with statusCode but not an Error instance
+    const nonError = { statusCode: 503, message: 'down' }
+    const fn = vi.fn().mockRejectedValue(nonError)
+
+    const promise = withRetry(fn, '/test', { maxAttempts: 2, baseDelay: 10, maxDelay: 100 })
+    const caught = promise.catch((e: unknown) => e)
+    await vi.runAllTimersAsync()
+    const err = await caught
+
+    expect(err).toBeInstanceOf(ServerError)
+    expect((err as ServerError).statusCode).toBe(503)
+  })
+
+  it('uses retryAfter=0 path (jitter) when retryAfter is 0', async () => {
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(new FakeHttpError(429, 'Rate limited', 0))
+      .mockResolvedValueOnce({ ok: true })
+
+    const promise = withRetry(fn, '/test', { baseDelay: 100, maxDelay: 1000 })
+    await vi.runAllTimersAsync()
+    const result = await promise
+    expect(result).toEqual({ ok: true })
+  })
 })

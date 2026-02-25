@@ -60,11 +60,23 @@ describe('PropertyFilter', () => {
     expect(params).toEqual({ tags: ['t1'] })
   })
 
+  it('.perPage sets perPage', () => {
+    const params = new PropertyFilter().perPage(50).toParams()
+    expect(params).toEqual({ perPage: 50 })
+  })
+
   it('is immutable — each method returns new instance, original unchanged', () => {
     const original = new PropertyFilter()
     const next = original.tags(['t1'])
     expect(next).not.toBe(original)
     expect(original.toParams()).toEqual({})
     expect(next.toParams()).toEqual({ tags: ['t1'] })
+  })
+})
+
+describe('ReservationFilter extra', () => {
+  it('.perPage sets perPage', () => {
+    const params = new ReservationFilter().perPage(25).toParams()
+    expect(params).toEqual({ perPage: 25 })
   })
 })
