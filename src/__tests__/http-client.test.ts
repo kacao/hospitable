@@ -304,5 +304,85 @@ describe('HttpClient', () => {
       expect(errorCall).toBeDefined()
       debugSpy.mockRestore()
     })
+
+    it('debug mode logs URL then body in order on POST', async () => {
+      mockFetch(200, { ok: true })
+      const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      const client = makeClient(true)
+      await client.post('/listings', { name: 'test' })
+      expect(debugSpy).toHaveBeenCalledTimes(2)
+      expect(String(debugSpy.mock.calls[0]?.[0])).toMatch(/\[hospitable\] POST/)
+      expect(String(debugSpy.mock.calls[1]?.[0])).toMatch(/\[hospitable\] body:/)
+      debugSpy.mockRestore()
+    })
+  })
+
+  describe('401 → token refresh → retry', () => {
+    it('calls onUnauthorized and retries with fresh token on 401', async () => {
+      let fetchCallCount = 0
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(() => {
+        fetchCallCount++
+        if (fetchCallCount === 1) {
+          return Promise.resolve({
+            ok: false, status: 401,
+            headers: new Headers(),
+            json: async () => ({ message: 'Unauthorized' }),
+          })
+        }
+        return Promise.resolve({
+          ok: true, status: 200,
+          headers: new Headers(),
+          json: async () => ({ data: 'retried' }),
+        })
+      }))
+
+      const onUnauthorized = vi.fn().mockResolvedValue(undefined)
+      const client = new HttpClient({
+        baseURL: 'https://api.hospitable.com',
+        getAuthHeader: async () => 'Bearer token',
+        onUnauthorized,
+        retryConfig: { maxAttempts: 1 },
+      })
+
+      const result = await client.get('/test')
+      expect(result).toEqual({ data: 'retried' })
+      expect(onUnauthorized).toHaveBeenCalledOnce()
+      expect(fetchCallCount).toBe(2) // original + retry
+    })
+
+    it('propagates error from retry response if still failing after refresh', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: false, status: 401,
+        headers: new Headers(),
+        json: async () => ({ message: 'Still unauthorized' }),
+      }))
+
+      const onUnauthorized = vi.fn().mockResolvedValue(undefined)
+      const client = new HttpClient({
+        baseURL: 'https://api.hospitable.com',
+        getAuthHeader: async () => 'Bearer token',
+        onUnauthorized,
+        retryConfig: { maxAttempts: 1 },
+      })
+
+      await expect(client.get('/test')).rejects.toMatchObject({ statusCode: 401 })
+      expect(onUnauthorized).toHaveBeenCalledOnce()
+    })
+
+    it('throws HttpError(401) immediately when no onUnauthorized is configured', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: false, status: 401,
+        headers: new Headers(),
+        json: async () => ({ message: 'Unauthorized' }),
+      }))
+
+      const client = new HttpClient({
+        baseURL: 'https://api.hospitable.com',
+        getAuthHeader: async () => 'Bearer token',
+        retryConfig: { maxAttempts: 1 },
+      })
+
+      await expect(client.get('/test')).rejects.toMatchObject({ statusCode: 401 })
+    })
   })
 })

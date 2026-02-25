@@ -136,5 +136,24 @@ describe('ReviewsResource', () => {
       const params = secondCall[1] as Record<string, unknown>
       expect(params['cursor']).toBe('next-cursor')
     })
+
+    it('iter() propagates errors thrown on the second page', async () => {
+      const rev1 = makeReview({ id: 'rev-1' })
+      const rev2 = makeReview({ id: 'rev-2' })
+      const page1 = makeList([rev1, rev2], 'cursor-page-2')
+
+      vi.mocked(http.get)
+        .mockResolvedValueOnce(page1)
+        .mockRejectedValueOnce(new Error('Network failure'))
+
+      const items: Review[] = []
+      await expect(async () => {
+        for await (const item of resource.iter()) {
+          items.push(item)
+        }
+      }).rejects.toThrow('Network failure')
+
+      expect(items).toEqual([rev1, rev2]) // first page items yielded before error
+    })
   })
 })

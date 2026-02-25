@@ -199,4 +199,20 @@ describe('withRetry', () => {
     const result = await promise
     expect(result).toEqual({ ok: true })
   })
+
+  it('onRateLimit fires on each 429 with incrementing attempt number', async () => {
+    const onRateLimit = vi.fn()
+    const fn = vi.fn()
+      .mockRejectedValueOnce(new FakeHttpError(429, 'Rate limited', 1))
+      .mockRejectedValueOnce(new FakeHttpError(429, 'Rate limited', 1))
+      .mockResolvedValueOnce({ ok: true })
+
+    const promise = withRetry(fn, '/listings', { onRateLimit, maxAttempts: 4, baseDelay: 100, maxDelay: 1000 })
+    await vi.runAllTimersAsync()
+    await promise
+
+    expect(onRateLimit).toHaveBeenCalledTimes(2)
+    expect(onRateLimit).toHaveBeenNthCalledWith(1, expect.objectContaining({ attempt: 1 }))
+    expect(onRateLimit).toHaveBeenNthCalledWith(2, expect.objectContaining({ attempt: 2 }))
+  })
 })
