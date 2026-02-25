@@ -52,6 +52,38 @@ describe('ReservationFilter', () => {
       include: 'guest',
     })
   })
+
+  it('.checkinBefore() is immutable', () => {
+    const original = new ReservationFilter({ startDate: '2026-01-01' })
+    const next = original.checkinBefore('2026-12-31')
+    expect(next).not.toBe(original)
+    expect(original.toParams().endDate).toBeUndefined()
+    expect(next.toParams().endDate).toBe('2026-12-31')
+  })
+
+  it('.include() is immutable', () => {
+    const original = new ReservationFilter()
+    const next = original.include('guest')
+    expect(next).not.toBe(original)
+    expect(original.toParams().include).toBeUndefined()
+    expect(next.toParams().include).toBe('guest')
+  })
+
+  it('.perPage() is immutable', () => {
+    const original = new ReservationFilter()
+    const next = original.perPage(50)
+    expect(next).not.toBe(original)
+    expect(original.toParams().perPage).toBeUndefined()
+    expect(next.toParams().perPage).toBe(50)
+  })
+
+  it('.properties() is immutable', () => {
+    const original = new ReservationFilter()
+    const next = original.properties(['a', 'b'])
+    expect(next).not.toBe(original)
+    expect(original.toParams().properties).toBeUndefined()
+    expect(next.toParams().properties).toEqual(['a', 'b'])
+  })
 })
 
 describe('PropertyFilter', () => {
@@ -71,6 +103,14 @@ describe('PropertyFilter', () => {
     expect(next).not.toBe(original)
     expect(original.toParams()).toEqual({})
     expect(next.toParams()).toEqual({ tags: ['t1'] })
+  })
+
+  it('.perPage() is immutable', () => {
+    const original = new PropertyFilter()
+    const next = original.perPage(25)
+    expect(next).not.toBe(original)
+    expect(original.toParams().perPage).toBeUndefined()
+    expect(next.toParams().perPage).toBe(25)
   })
 })
 
