@@ -294,5 +294,38 @@ describe('TokenManager', () => {
       expect(header).toBe('Bearer env-pat-token')
       expect(mockFetch).not.toHaveBeenCalled()
     })
+
+    it('explicit token in config takes priority over HOSPITABLE_PAT env var', async () => {
+      process.env['HOSPITABLE_PAT'] = 'env-pat'
+      const tm = new TokenManager({ token: 'config-token', baseURL: 'https://api.hospitable.com' })
+      const header = await tm.getAuthHeader()
+      expect(header).toBe('Bearer config-token')
+    })
+
+    it('env var PAT sets Infinity expiry (never refreshes)', async () => {
+      const mockFetch = vi.fn()
+      vi.stubGlobal('fetch', mockFetch)
+      process.env['HOSPITABLE_PAT'] = 'env-token'
+      const tm = new TokenManager({ baseURL: 'https://api.hospitable.com' })
+      await tm.getAuthHeader()
+      await tm.getAuthHeader()
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('concurrent callers both reject when refresh fails', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: false, status: 401,
+        text: () => Promise.resolve('Unauthorized'),
+        json: () => Promise.resolve({}),
+      })
+      vi.stubGlobal('fetch', mockFetch)
+      const tm = new TokenManager({
+        clientId: 'id', clientSecret: 'sec', baseURL: 'https://api.hospitable.com',
+      })
+      const [p1, p2] = [tm.getAuthHeader(), tm.getAuthHeader()]
+      await expect(p1).rejects.toThrow('Token refresh failed (401)')
+      await expect(p2).rejects.toThrow('Token refresh failed (401)')
+      expect(mockFetch).toHaveBeenCalledOnce()
+    })
   })
 })
