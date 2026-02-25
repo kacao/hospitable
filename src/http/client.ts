@@ -74,7 +74,7 @@ export class HttpClient {
         const response = await fetch(url, {
           method,
           headers,
-          body: body !== undefined ? JSON.stringify(body) : undefined,
+          ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
         })
 
         const requestId = response.headers.get('x-request-id') ?? undefined
@@ -102,7 +102,7 @@ export class HttpClient {
   }
 
   get<T>(path: string, params?: RequestOptions['params']): Promise<T> {
-    return this.request<T>(path, { method: 'GET', params })
+    return this.request<T>(path, { method: 'GET', ...(params !== undefined ? { params } : {}) })
   }
 
   post<T>(path: string, body?: unknown): Promise<T> {

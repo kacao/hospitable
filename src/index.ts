@@ -19,3 +19,6 @@ export type { TokenManagerConfig } from './auth'
 
 export { paginate, collectAll } from './http/paginate'
 export type { PageFetcher } from './http/paginate'
+
+export { PropertiesResource } from './resources'
+export type { PropertyListParams } from './resources'
