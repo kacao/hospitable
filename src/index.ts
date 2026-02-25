@@ -13,3 +13,6 @@ export {
 } from './errors'
 
 export * from './models/index'
+
+export { TokenManager } from './auth'
+export type { TokenManagerConfig } from './auth'
