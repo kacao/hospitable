@@ -26,3 +26,5 @@ export type { PropertyListParams } from './resources'
 export { ReservationsResource } from './resources'
 
 export { MessagesResource } from './resources'
+
+export { CalendarResource } from './resources'
