@@ -14,6 +14,7 @@ export interface RequestOptions {
 export interface HttpClientConfig {
   baseURL: string
   getAuthHeader: () => Promise<string>
+  onUnauthorized?: () => Promise<void>
   debug?: boolean
   retryConfig?: RetryConfig
 }
@@ -93,6 +94,24 @@ export class HttpClient {
           const message = (errorBody['message'] as string | undefined) ?? `HTTP ${response.status}`
           if (this.config.debug) {
             console.debug('[hospitable] error body:', sanitize(errorBody))
+          }
+          if (response.status === 401 && this.config.onUnauthorized) {
+            await this.config.onUnauthorized()
+            // Re-fetch auth header with the fresh token and retry once
+            const freshAuth = await this.config.getAuthHeader()
+            const retryResponse = await fetch(url, {
+              method,
+              headers: { ...headers, Authorization: freshAuth },
+              ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+            })
+            if (retryResponse.ok) {
+              if (retryResponse.status === 204) return undefined as T
+              return retryResponse.json() as Promise<T>
+            }
+            let retryBody: Record<string, unknown> = {}
+            try { retryBody = (await retryResponse.json()) as Record<string, unknown> } catch { /* ignore */ }
+            const retryMessage = (retryBody['message'] as string | undefined) ?? `HTTP ${retryResponse.status}`
+            throw new HttpError(retryResponse.status, retryMessage, retryResponse.headers.get('x-request-id') ?? undefined, retryBody)
           }
           throw new HttpError(response.status, message, requestId, errorBody)
         }

@@ -2,6 +2,8 @@ import { TokenManager } from './auth'
 import type { TokenManagerConfig } from './auth'
 import { HttpClient } from './http/client'
 import type { RetryConfig } from './http/retry'
+import { CalendarResource } from './resources/calendar'
+import { MessagesResource } from './resources/messages'
 import { PropertiesResource } from './resources/properties'
 import { ReservationsResource } from './resources/reservations'
 import { ReviewsResource } from './resources/reviews'
@@ -26,6 +28,8 @@ export interface HospitableClientConfig {
 export class HospitableClient {
   readonly properties: PropertiesResource
   readonly reservations: ReservationsResource
+  readonly calendar: CalendarResource
+  readonly messages: MessagesResource
   readonly reviews: ReviewsResource
 
   constructor(config: HospitableClientConfig = {}) {
@@ -44,12 +48,15 @@ export class HospitableClient {
     const httpClient = new HttpClient({
       baseURL,
       getAuthHeader: () => tokenManager.getAuthHeader(),
+      onUnauthorized: () => tokenManager.handleUnauthorized(),
       ...(config.debug !== undefined ? { debug: config.debug } : {}),
       ...(config.retry !== undefined ? { retryConfig: config.retry } : {}),
     })
 
     this.properties = new PropertiesResource(httpClient)
     this.reservations = new ReservationsResource(httpClient)
+    this.calendar = new CalendarResource(httpClient)
+    this.messages = new MessagesResource(httpClient)
     this.reviews = new ReviewsResource(httpClient)
   }
 }
