@@ -1,6 +1,6 @@
 {
   "name": "hospitable",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "Khanh Cao <tyrocium@gmail.com>",
   "repository": {
     "type": "git",
@@ -22,7 +22,9 @@
     }
   },
   "type": "module",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -33,7 +35,13 @@
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
-  "keywords": ["hospitable", "api", "sdk", "short-term-rental", "airbnb"],
+  "keywords": [
+    "hospitable",
+    "api",
+    "sdk",
+    "short-term-rental",
+    "airbnb"
+  ],
   "license": "MIT",
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.0.0",
