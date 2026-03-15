@@ -25,6 +25,6 @@ export type ReviewList = import('./pagination').PaginatedResponse<Review>
 export interface ReviewListParams {
   propertyId?: string
   responded?: boolean
-  cursor?: string
+  page?: number
   perPage?: number
 }

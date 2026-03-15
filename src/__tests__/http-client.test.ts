@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { HttpClient, HttpError } from '../http/client'
 import { VERSION } from '../index'
 
-const BASE_URL = 'https://api.hospitable.com'
+const BASE_URL = 'https://public.api.hospitable.com'
 const AUTH_HEADER = 'Bearer test-token'
 
 function makeClient(debug = false) {
@@ -54,13 +54,20 @@ describe('HttpClient', () => {
       expect(url).toContain('q=beach')
     })
 
-    it('serializes array params as repeated keys', async () => {
+    it('serializes array params as repeated keys with [] suffix', async () => {
       mockFetch(200, [])
       const client = makeClient()
       await client.get('/listings', { ids: ['a', 'b', 'c'] })
       const url = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
       const parsed = new URL(url)
-      expect(parsed.searchParams.getAll('ids')).toEqual(['a', 'b', 'c'])
+      expect(parsed.searchParams.getAll('ids[]')).toEqual(['a', 'b', 'c'])
+    })
+
+    it('transforms snake_case response keys to camelCase', async () => {
+      mockFetch(200, { listing_id: 'abc', start_date: '2026-01-01', nested: { some_key: 'value' } })
+      const client = makeClient()
+      const result = await client.get<Record<string, unknown>>('/listings')
+      expect(result).toEqual({ listingId: 'abc', startDate: '2026-01-01', nested: { someKey: 'value' } })
     })
 
     it('omits undefined params', async () => {
@@ -338,7 +345,7 @@ describe('HttpClient', () => {
 
       const onUnauthorized = vi.fn().mockResolvedValue(undefined)
       const client = new HttpClient({
-        baseURL: 'https://api.hospitable.com',
+        baseURL: BASE_URL,
         getAuthHeader: async () => 'Bearer token',
         onUnauthorized,
         retryConfig: { maxAttempts: 1 },
@@ -350,6 +357,36 @@ describe('HttpClient', () => {
       expect(fetchCallCount).toBe(2) // original + retry
     })
 
+    it('transforms snake_case to camelCase on 401-retry success response', async () => {
+      let fetchCallCount = 0
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(() => {
+        fetchCallCount++
+        if (fetchCallCount === 1) {
+          return Promise.resolve({
+            ok: false, status: 401,
+            headers: new Headers(),
+            json: async () => ({ message: 'Unauthorized' }),
+          })
+        }
+        return Promise.resolve({
+          ok: true, status: 200,
+          headers: new Headers(),
+          json: async () => ({ user_id: 'abc', created_at: '2026-01-01' }),
+        })
+      }))
+
+      const onUnauthorized = vi.fn().mockResolvedValue(undefined)
+      const client = new HttpClient({
+        baseURL: BASE_URL,
+        getAuthHeader: async () => 'Bearer token',
+        onUnauthorized,
+        retryConfig: { maxAttempts: 1 },
+      })
+
+      const result = await client.get<Record<string, unknown>>('/test')
+      expect(result).toEqual({ userId: 'abc', createdAt: '2026-01-01' })
+    })
+
     it('propagates error from retry response if still failing after refresh', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
         ok: false, status: 401,
@@ -359,7 +396,7 @@ describe('HttpClient', () => {
 
       const onUnauthorized = vi.fn().mockResolvedValue(undefined)
       const client = new HttpClient({
-        baseURL: 'https://api.hospitable.com',
+        baseURL: BASE_URL,
         getAuthHeader: async () => 'Bearer token',
         onUnauthorized,
         retryConfig: { maxAttempts: 1 },
@@ -377,7 +414,7 @@ describe('HttpClient', () => {
       }))
 
       const client = new HttpClient({
-        baseURL: 'https://api.hospitable.com',
+        baseURL: BASE_URL,
         getAuthHeader: async () => 'Bearer token',
         retryConfig: { maxAttempts: 1 },
       })

@@ -1,10 +1,9 @@
 import type { HttpClient, RequestOptions } from '../http/client'
 import type { Property, PropertyList, PropertyTag } from '../models/property'
-import type { CalendarDay, CalendarUpdate } from '../models/calendar'
-import type { PaginatedResponse } from '../models/pagination'
+import { paginate } from '../http/paginate'
 
 export interface PropertyListParams {
-  cursor?: string
+  page?: number
   perPage?: number
   tags?: string[]
 }
@@ -25,33 +24,7 @@ export class PropertiesResource {
     return response.data
   }
 
-  async getCalendar(
-    id: string,
-    startDate: string,
-    endDate: string,
-  ): Promise<PaginatedResponse<CalendarDay>> {
-    return this.http.get<PaginatedResponse<CalendarDay>>(`/v2/properties/${id}/calendar`, {
-      startDate,
-      endDate,
-    })
-  }
-
-  async updateCalendar(id: string, updates: CalendarUpdate[]): Promise<void> {
-    await this.http.put<void>(`/v2/properties/${id}/calendar`, { data: updates })
-  }
-
-  async *iter(params: Omit<PropertyListParams, 'cursor'> = {}): AsyncGenerator<Property> {
-    let cursor: string | null = null
-    do {
-      const listParams: PropertyListParams = { ...params }
-      if (cursor !== null) {
-        listParams.cursor = cursor
-      }
-      const page = await this.list(listParams)
-      for (const item of page.data) {
-        yield item
-      }
-      cursor = page.meta.nextCursor
-    } while (cursor !== null)
+  async *iter(params: Omit<PropertyListParams, 'page'> = {}): AsyncGenerator<Property> {
+    yield* paginate<Property, PropertyListParams>(p => this.list(p), params)
   }
 }

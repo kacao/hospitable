@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ReviewsResource } from '../resources/reviews'
 import type { HttpClient } from '../http/client'
 import type { Review, ReviewList } from '../models/review'
+import { makeHttpClient } from './helpers'
 
 function makeReview(overrides: Partial<Review> = {}): Review {
   return {
@@ -26,19 +27,12 @@ function makeReview(overrides: Partial<Review> = {}): Review {
   }
 }
 
-function makeList(data: Review[], nextCursor: string | null = null): ReviewList {
-  return { data, meta: { nextCursor, total: data.length, perPage: 20 } }
-}
-
-function makeHttpClient(): HttpClient {
+function makeList(data: Review[], currentPage = 1, lastPage = 1): ReviewList {
   return {
-    get: vi.fn(),
-    post: vi.fn(),
-    put: vi.fn(),
-    patch: vi.fn(),
-    delete: vi.fn(),
-    request: vi.fn(),
-  } as unknown as HttpClient
+    data,
+    meta: { currentPage, lastPage, perPage: 20, total: data.length },
+    links: { first: null, last: null, prev: null, next: currentPage < lastPage ? 'next' : null },
+  }
 }
 
 describe('ReviewsResource', () => {
@@ -96,13 +90,13 @@ describe('ReviewsResource', () => {
   })
 
   describe('iter()', () => {
-    it('yields items across 2 pages and stops when nextCursor is null', async () => {
+    it('yields items across 2 pages and stops when lastPage reached', async () => {
       const rev1 = makeReview({ id: 'rev-1' })
       const rev2 = makeReview({ id: 'rev-2' })
       const rev3 = makeReview({ id: 'rev-3' })
 
-      const page1 = makeList([rev1, rev2], 'cursor-page-2')
-      const page2 = makeList([rev3], null)
+      const page1 = makeList([rev1, rev2], 1, 2)
+      const page2 = makeList([rev3], 2, 2)
 
       vi.mocked(http.get)
         .mockResolvedValueOnce(page1)
@@ -120,9 +114,9 @@ describe('ReviewsResource', () => {
       expect(http.get).toHaveBeenCalledTimes(2)
     })
 
-    it('passes cursor from first page to second page request', async () => {
-      const page1 = makeList([makeReview({ id: 'rev-1' })], 'next-cursor')
-      const page2 = makeList([], null)
+    it('passes page=2 on second page request', async () => {
+      const page1 = makeList([makeReview({ id: 'rev-1' })], 1, 2)
+      const page2 = makeList([], 2, 2)
 
       vi.mocked(http.get)
         .mockResolvedValueOnce(page1)
@@ -134,13 +128,13 @@ describe('ReviewsResource', () => {
 
       const secondCall = vi.mocked(http.get).mock.calls[1]!
       const params = secondCall[1] as Record<string, unknown>
-      expect(params['cursor']).toBe('next-cursor')
+      expect(params['page']).toBe(2)
     })
 
     it('iter() propagates errors thrown on the second page', async () => {
       const rev1 = makeReview({ id: 'rev-1' })
       const rev2 = makeReview({ id: 'rev-2' })
-      const page1 = makeList([rev1, rev2], 'cursor-page-2')
+      const page1 = makeList([rev1, rev2], 1, 2)
 
       vi.mocked(http.get)
         .mockResolvedValueOnce(page1)
@@ -153,7 +147,7 @@ describe('ReviewsResource', () => {
         }
       }).rejects.toThrow('Network failure')
 
-      expect(items).toEqual([rev1, rev2]) // first page items yielded before error
+      expect(items).toEqual([rev1, rev2])
     })
   })
 })

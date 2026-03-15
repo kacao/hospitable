@@ -38,16 +38,16 @@ describe('HospitableClient', () => {
     expect(client.reservations).toBeInstanceOf(ReservationsResource)
   })
 
-  it('uses default baseURL https://api.hospitable.com', async () => {
-    mockFetch(200, { data: [], meta: { nextCursor: null, total: 0, perPage: 10 } })
+  it('uses default baseURL https://public.api.hospitable.com', async () => {
+    mockFetch(200, { data: [], meta: { currentPage: 1, lastPage: 1, perPage: 10, total: 0 }, links: { first: null, last: null, prev: null, next: null } })
     const client = new HospitableClient({ token: 'pat123' })
     await client.properties.list()
     const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
-    expect(fetchCall[0]).toContain('https://api.hospitable.com')
+    expect(fetchCall[0]).toContain('https://public.api.hospitable.com')
   })
 
   it('passes custom baseURL through to requests', async () => {
-    mockFetch(200, { data: [], meta: { nextCursor: null, total: 0, perPage: 10 } })
+    mockFetch(200, { data: [], meta: { currentPage: 1, lastPage: 1, perPage: 10, total: 0 }, links: { first: null, last: null, prev: null, next: null } })
     const client = new HospitableClient({
       token: 'pat123',
       baseURL: 'https://custom.example.com',
@@ -124,7 +124,7 @@ describe('HospitableClient', () => {
       return Promise.resolve({
         ok: true, status: 200,
         headers: new Headers({ 'Content-Type': 'application/json' }),
-        json: async () => ({ data: [], meta: { nextCursor: null, total: 0, perPage: 10 } }),
+        json: async () => ({ data: [], meta: { currentPage: 1, lastPage: 1, perPage: 10, total: 0 }, links: { first: null, last: null, prev: null, next: null } }),
         text: async () => '',
       })
     }))

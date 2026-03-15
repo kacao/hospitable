@@ -1,16 +1,16 @@
-import type { HttpClient } from '../http/client'
+import type { HttpClient, RequestOptions } from '../http/client'
 import type { Review, ReviewList, ReviewListParams } from '../models/review'
+import { paginate } from '../http/paginate'
 
 export class ReviewsResource {
   constructor(private readonly http: HttpClient) {}
 
   async list(params: ReviewListParams = {}): Promise<ReviewList> {
-    const normalized: Record<string, string | number | boolean | string[] | undefined> = {
-      propertyId: params.propertyId,
-      responded: params.responded,
-      cursor: params.cursor,
-      perPage: params.perPage,
-    }
+    const normalized: RequestOptions['params'] = {}
+    if (params.propertyId !== undefined) normalized['propertyId'] = params.propertyId
+    if (params.responded !== undefined) normalized['responded'] = params.responded
+    if (params.perPage !== undefined) normalized['perPage'] = params.perPage
+    if (params.page !== undefined) normalized['page'] = params.page
     return this.http.get<ReviewList>('/v2/reviews', normalized)
   }
 
@@ -22,14 +22,7 @@ export class ReviewsResource {
     return this.http.post<Review>(`/v2/reviews/${id}/response`, { response: responseText })
   }
 
-  async *iter(params: Omit<ReviewListParams, 'cursor'> = {}): AsyncGenerator<Review> {
-    let cursor: string | null = null
-    do {
-      const pageParams: ReviewListParams = { ...params }
-      if (cursor !== null) pageParams.cursor = cursor
-      const page = await this.list(pageParams)
-      for (const item of page.data) yield item
-      cursor = page.meta.nextCursor
-    } while (cursor !== null)
+  async *iter(params: Omit<ReviewListParams, 'page'> = {}): AsyncGenerator<Review> {
+    yield* paginate<Review, ReviewListParams>(p => this.list(p), params)
   }
 }

@@ -1,6 +1,7 @@
 import { VERSION } from '../index'
 import { withRetry, type RetryConfig } from './retry'
 import { sanitize } from '../utils/sanitize'
+import { deepSnakeToCamel } from '../utils/case'
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
@@ -41,7 +42,7 @@ function buildURL(base: string, path: string, params?: RequestOptions['params'])
     for (const [key, value] of Object.entries(params)) {
       if (value === undefined) continue
       if (Array.isArray(value)) {
-        value.forEach((v) => url.searchParams.append(key, v))
+        value.forEach((v) => url.searchParams.append(`${key}[]`, v))
       } else {
         url.searchParams.set(key, String(value))
       }
@@ -52,6 +53,11 @@ function buildURL(base: string, path: string, params?: RequestOptions['params'])
 
 export class HttpClient {
   constructor(private readonly config: HttpClientConfig) {}
+
+  private async parseResponse<T>(response: Response): Promise<T> {
+    if (response.status === 204) return undefined as T
+    return response.json().then(deepSnakeToCamel) as Promise<T>
+  }
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const { method = 'GET', params, body, headers: extraHeaders = {} } = options
@@ -97,7 +103,6 @@ export class HttpClient {
           }
           if (response.status === 401 && this.config.onUnauthorized) {
             await this.config.onUnauthorized()
-            // Re-fetch auth header with the fresh token and retry once
             const freshAuth = await this.config.getAuthHeader()
             const retryResponse = await fetch(url, {
               method,
@@ -105,8 +110,7 @@ export class HttpClient {
               ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
             })
             if (retryResponse.ok) {
-              if (retryResponse.status === 204) return undefined as T
-              return retryResponse.json() as Promise<T>
+              return this.parseResponse<T>(retryResponse)
             }
             let retryBody: Record<string, unknown> = {}
             try { retryBody = (await retryResponse.json()) as Record<string, unknown> } catch { /* ignore */ }
@@ -116,11 +120,7 @@ export class HttpClient {
           throw new HttpError(response.status, message, requestId, errorBody)
         }
 
-        if (response.status === 204) {
-          return undefined as T
-        }
-
-        return response.json() as Promise<T>
+        return this.parseResponse<T>(response)
       },
       url,
       this.config.retryConfig,

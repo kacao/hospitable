@@ -1,35 +1,30 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CalendarResource } from '../resources/calendar'
 import type { HttpClient } from '../http/client'
-import type { CalendarDay, CalendarUpdate } from '../models/calendar'
-import type { PaginatedResponse } from '../models/pagination'
+import type { CalendarDay, CalendarData, CalendarUpdate } from '../models/calendar'
+import { makeHttpClient } from './helpers'
 
 function makeCalendarDay(overrides: Partial<CalendarDay> = {}): CalendarDay {
   return {
     date: '2026-03-01',
-    available: true,
-    price: { amount: 10000, currency: 'USD' },
+    day: 'SUNDAY',
     minStay: 1,
-    maxStay: null,
-    notes: null,
-    blockedReason: null,
+    closedForCheckin: false,
+    closedForCheckout: false,
+    status: { reason: 'AVAILABLE', source: null, sourceType: 'RESERVATION', available: true },
+    price: { amount: 10000, currency: 'USD', formatted: '$100.00' },
     ...overrides,
   }
 }
 
-function makePage(data: CalendarDay[]): PaginatedResponse<CalendarDay> {
-  return { data, meta: { nextCursor: null, total: data.length, perPage: 20 } }
-}
-
-function makeHttpClient(): HttpClient {
+function makeCalendarData(days: CalendarDay[] = []): CalendarData {
   return {
-    get: vi.fn(),
-    post: vi.fn(),
-    put: vi.fn(),
-    patch: vi.fn(),
-    delete: vi.fn(),
-    request: vi.fn(),
-  } as unknown as HttpClient
+    listingId: 'prop-1',
+    provider: 'airbnb',
+    startDate: '2026-03-01',
+    endDate: '2026-03-31',
+    days,
+  }
 }
 
 describe('CalendarResource', () => {
@@ -42,9 +37,9 @@ describe('CalendarResource', () => {
   })
 
   describe('get()', () => {
-    it('calls GET with correct path and date params', async () => {
-      const page = makePage([makeCalendarDay()])
-      vi.mocked(http.get).mockResolvedValue(page)
+    it('calls GET with correct path and date params and returns CalendarData', async () => {
+      const calendarData = makeCalendarData([makeCalendarDay()])
+      vi.mocked(http.get).mockResolvedValue({ data: calendarData })
 
       const result = await resource.get('prop-1', '2026-03-01', '2026-03-31')
 
@@ -52,7 +47,17 @@ describe('CalendarResource', () => {
         startDate: '2026-03-01',
         endDate: '2026-03-31',
       })
-      expect(result).toBe(page)
+      expect(result).toEqual(calendarData)
+    })
+
+    it('unwraps the data wrapper from the response', async () => {
+      const calendarData = makeCalendarData([makeCalendarDay()])
+      vi.mocked(http.get).mockResolvedValue({ data: calendarData })
+
+      const result = await resource.get('prop-1', '2026-03-01', '2026-03-31')
+
+      expect(result.listingId).toBe('prop-1')
+      expect(result.days).toHaveLength(1)
     })
   })
 
@@ -123,12 +128,12 @@ describe('CalendarResource', () => {
 
   describe('price amounts', () => {
     it('passes price amounts through as-is (cents, integer)', async () => {
-      const page = makePage([makeCalendarDay({ price: { amount: 25050, currency: 'USD' } })])
-      vi.mocked(http.get).mockResolvedValue(page)
+      const calendarData = makeCalendarData([makeCalendarDay({ price: { amount: 25050, currency: 'USD', formatted: '$250.50' } })])
+      vi.mocked(http.get).mockResolvedValue({ data: calendarData })
 
       const result = await resource.get('prop-1', '2026-03-01', '2026-03-01')
 
-      expect(result.data[0]!.price.amount).toBe(25050)
+      expect(result.days[0]!.price.amount).toBe(25050)
     })
   })
 })

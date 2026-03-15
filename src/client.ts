@@ -17,7 +17,7 @@ export interface HospitableClientConfig {
   clientId?: string
   /** OAuth2 client secret */
   clientSecret?: string
-  /** API base URL. Defaults to https://api.hospitable.com */
+  /** API base URL. Defaults to https://public.api.hospitable.com */
   baseURL?: string
   /** Retry configuration */
   retry?: RetryConfig
@@ -33,7 +33,7 @@ export class HospitableClient {
   readonly reviews: ReviewsResource
 
   constructor(config: HospitableClientConfig = {}) {
-    const baseURL = config.baseURL ?? 'https://api.hospitable.com'
+    const baseURL = config.baseURL ?? 'https://public.api.hospitable.com'
 
     const tokenConfig: TokenManagerConfig = {
       ...(config.token !== undefined ? { token: config.token } : {}),

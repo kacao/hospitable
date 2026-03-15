@@ -1,8 +1,15 @@
 export interface PaginatedResponse<T> {
   data: T[]
   meta: {
-    nextCursor: string | null
-    total: number
+    currentPage: number
+    lastPage: number
     perPage: number
+    total: number
+  }
+  links: {
+    first: string | null
+    last: string | null
+    prev: string | null
+    next: string | null
   }
 }

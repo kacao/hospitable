@@ -1,6 +1,5 @@
 import type { HttpClient } from '../http/client'
-import type { CalendarDay, CalendarUpdate } from '../models/calendar'
-import type { PaginatedResponse } from '../models/pagination'
+import type { CalendarData, CalendarUpdate } from '../models/calendar'
 
 export class CalendarResource {
   constructor(private readonly http: HttpClient) {}
@@ -9,11 +8,12 @@ export class CalendarResource {
     propertyId: string,
     startDate: string,
     endDate: string,
-  ): Promise<PaginatedResponse<CalendarDay>> {
-    return this.http.get<PaginatedResponse<CalendarDay>>(
+  ): Promise<CalendarData> {
+    const response = await this.http.get<{ data: CalendarData }>(
       `/v2/properties/${propertyId}/calendar`,
       { startDate, endDate },
     )
+    return response.data
   }
 
   async update(propertyId: string, updates: CalendarUpdate[]): Promise<void> {

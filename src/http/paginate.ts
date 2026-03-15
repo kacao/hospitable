@@ -1,38 +1,31 @@
 import type { PaginatedResponse } from '../models/pagination'
 
-export interface PageFetcher<T, P extends { cursor?: string; perPage?: number }> {
+export interface PageFetcher<T, P extends { page?: number; perPage?: number }> {
   (params: P): Promise<PaginatedResponse<T>>
 }
 
-export async function* paginate<T, P extends { cursor?: string; perPage?: number }>(
+export async function* paginate<T, P extends { page?: number; perPage?: number }>(
   fetcher: PageFetcher<T, P>,
-  params: Omit<P, 'cursor'>,
-  perPage = 100,
+  params: Omit<P, 'page'>,
 ): AsyncGenerator<T> {
-  let cursor: string | null = null
-
+  let page = 1
+  let lastPage = 1
   do {
-    const page = await fetcher({
-      ...params,
-      cursor: cursor ?? undefined,
-      perPage,
-    } as P)
-
-    for (const item of page.data) {
+    const result = await fetcher({ ...params, page } as P)
+    for (const item of result.data) {
       yield item
     }
-
-    cursor = page.meta.nextCursor
-  } while (cursor !== null)
+    lastPage = result.meta.lastPage
+    page++
+  } while (page <= lastPage)
 }
 
-export async function collectAll<T, P extends { cursor?: string; perPage?: number }>(
+export async function collectAll<T, P extends { page?: number; perPage?: number }>(
   fetcher: PageFetcher<T, P>,
-  params: Omit<P, 'cursor'>,
-  perPage = 100,
+  params: Omit<P, 'page'>,
 ): Promise<T[]> {
   const results: T[] = []
-  for await (const item of paginate(fetcher, params, perPage)) {
+  for await (const item of paginate(fetcher, params)) {
     results.push(item)
   }
   return results

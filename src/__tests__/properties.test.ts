@@ -2,43 +2,45 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { PropertiesResource } from '../resources/properties'
 import type { HttpClient } from '../http/client'
 import type { Property, PropertyTag } from '../models/property'
-import type { CalendarDay, CalendarUpdate } from '../models/calendar'
 import type { PaginatedResponse } from '../models/pagination'
-
-function makeHttpClient() {
-  return {
-    get: vi.fn(),
-    post: vi.fn(),
-    put: vi.fn(),
-    patch: vi.fn(),
-    delete: vi.fn(),
-    request: vi.fn(),
-  } as unknown as HttpClient
-}
+import { makeHttpClient } from './helpers'
 
 const mockProperty: Property = {
   id: 'prop-1',
   name: 'Beach House',
-  platform: 'airbnb',
-  platformId: 'airbnb-123',
-  active: true,
+  publicName: 'Beach House Public',
+  picture: null,
+  listed: true,
   timezone: 'America/New_York',
   currency: 'USD',
   address: {
+    number: null,
     street: '123 Ocean Ave',
     city: 'Miami',
     state: 'FL',
+    postcode: '33101',
     country: 'US',
-    zipCode: '33101',
+    countryName: 'United States',
+    coordinates: { latitude: '25.7617', longitude: '-80.1918' },
+    display: '123 Ocean Ave, Miami, FL 33101',
   },
+  summary: null,
+  description: null,
+  checkin: '15:00',
+  checkout: '11:00',
+  amenities: [],
+  capacity: { max: 4, bedrooms: 2, beds: 2, bathrooms: 1 },
+  propertyType: 'house',
+  roomType: 'entire_home',
   tags: [],
-  createdAt: '2024-01-01T00:00:00Z',
-  updatedAt: '2024-01-01T00:00:00Z',
+  houseRules: { petsAllowed: false, smokingAllowed: false, eventsAllowed: false },
+  calendarRestricted: false,
 }
 
 const mockPropertyList: PaginatedResponse<Property> = {
   data: [mockProperty],
-  meta: { nextCursor: null, total: 1, perPage: 10 },
+  meta: { currentPage: 1, lastPage: 1, perPage: 10, total: 1 },
+  links: { first: null, last: null, prev: null, next: null },
 }
 
 describe('PropertiesResource', () => {
@@ -78,45 +80,16 @@ describe('PropertiesResource', () => {
     expect(result).toEqual(tags)
   })
 
-  it('getCalendar(id, start, end) calls GET with startDate/endDate params', async () => {
-    const calendarResponse: PaginatedResponse<CalendarDay> = {
-      data: [
-        {
-          date: '2024-06-01',
-          available: true,
-          price: { amount: 150, currency: 'USD' },
-          minStay: 2,
-          maxStay: null,
-          notes: null,
-          blockedReason: null,
-        },
-      ],
-      meta: { nextCursor: null, total: 1, perPage: 30 },
-    }
-    vi.mocked(http.get).mockResolvedValue(calendarResponse)
-    const result = await resource.getCalendar('prop-1', '2024-06-01', '2024-06-30')
-    expect(http.get).toHaveBeenCalledWith('/v2/properties/prop-1/calendar', {
-      startDate: '2024-06-01',
-      endDate: '2024-06-30',
-    })
-    expect(result).toEqual(calendarResponse)
-  })
-
-  it('updateCalendar(id, updates) calls PUT with { data: updates } body', async () => {
-    vi.mocked(http.put).mockResolvedValue(undefined)
-    const updates: CalendarUpdate[] = [{ date: '2024-06-01', available: false }]
-    await resource.updateCalendar('prop-1', updates)
-    expect(http.put).toHaveBeenCalledWith('/v2/properties/prop-1/calendar', { data: updates })
-  })
-
   it('iter() yields items across 2 pages', async () => {
     const page1: PaginatedResponse<Property> = {
       data: [{ ...mockProperty, id: 'prop-1' }],
-      meta: { nextCursor: 'cursor-abc', total: 2, perPage: 1 },
+      meta: { currentPage: 1, lastPage: 2, perPage: 1, total: 2 },
+      links: { first: null, last: null, prev: null, next: 'next' },
     }
     const page2: PaginatedResponse<Property> = {
       data: [{ ...mockProperty, id: 'prop-2' }],
-      meta: { nextCursor: null, total: 2, perPage: 1 },
+      meta: { currentPage: 2, lastPage: 2, perPage: 1, total: 2 },
+      links: { first: null, last: null, prev: null, next: null },
     }
     vi.mocked(http.get).mockResolvedValueOnce(page1).mockResolvedValueOnce(page2)
 
@@ -129,7 +102,7 @@ describe('PropertiesResource', () => {
     expect(results[0].id).toBe('prop-1')
     expect(results[1].id).toBe('prop-2')
     expect(http.get).toHaveBeenCalledTimes(2)
-    expect(http.get).toHaveBeenNthCalledWith(1, '/v2/properties', { cursor: undefined })
-    expect(http.get).toHaveBeenNthCalledWith(2, '/v2/properties', { cursor: 'cursor-abc' })
+    expect(http.get).toHaveBeenNthCalledWith(1, '/v2/properties', { page: 1 })
+    expect(http.get).toHaveBeenNthCalledWith(2, '/v2/properties', { page: 2 })
   })
 })

@@ -1,16 +1,32 @@
-export interface PriceAmount {
+export interface CalendarDayPrice {
   amount: number
   currency: string
+  formatted: string
+}
+
+export interface CalendarDayStatus {
+  reason: string
+  source: string | null
+  sourceType: string
+  available: boolean
 }
 
 export interface CalendarDay {
   date: string
-  available: boolean
-  price: PriceAmount
+  day: string
   minStay: number
-  maxStay: number | null
-  notes: string | null
-  blockedReason: string | null
+  closedForCheckin: boolean
+  closedForCheckout: boolean
+  status: CalendarDayStatus
+  price: CalendarDayPrice
+}
+
+export interface CalendarData {
+  listingId: string
+  provider: string
+  startDate: string
+  endDate: string
+  days: CalendarDay[]
 }
 
 export interface CalendarUpdate {
@@ -18,11 +34,4 @@ export interface CalendarUpdate {
   price?: { amount: number }
   available?: boolean
   minStay?: number
-  maxStay?: number | null
-  notes?: string | null
-}
-
-export interface CalendarGetParams {
-  startDate: string
-  endDate: string
 }
