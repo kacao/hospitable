@@ -1,3 +1,11 @@
+export type ReservationStatus =
+  | 'accepted'
+  | 'confirmed'
+  | 'pending'
+  | 'cancelled'
+  | 'declined'
+  | string
+
 export type ReservationPlatform = 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | string
 
 export interface Guest {
@@ -33,7 +41,7 @@ export interface Reservation {
   nights: number
   stayType: string
   ownerStay: boolean | null
-  status: string
+  status: ReservationStatus
   guests: ReservationGuests
   guest?: Guest
   notes: string | null

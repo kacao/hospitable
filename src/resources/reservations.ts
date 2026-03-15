@@ -43,7 +43,7 @@ export class ReservationsResource {
   ) {
     const enabled = cacheConfig?.enabled ?? false
     this.cache = enabled
-      ? new MemoryCache({ ttl: cacheConfig?.ttl ?? DEFAULT_TTL, maxSize: cacheConfig?.maxSize })
+      ? new MemoryCache({ ttl: cacheConfig?.ttl ?? DEFAULT_TTL, ...(cacheConfig?.maxSize !== undefined ? { maxSize: cacheConfig.maxSize } : {}) })
       : null
   }
 
