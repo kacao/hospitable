@@ -1,7 +1,7 @@
 export const VERSION = '0.1.0'
 
 export { HospitableClient } from './client'
-export type { HospitableClientConfig } from './client'
+export type { HospitableClientConfig, ResourceCacheConfig } from './client'
 
 export {
   HospitableError,
@@ -33,6 +33,7 @@ export { CalendarResource } from './resources'
 
 export { ReviewsResource } from './resources'
 
-export { sanitize } from './utils'
+export { sanitize, MemoryCache, cacheKey } from './utils'
+export type { CacheConfig } from './utils'
 
 export { ReservationFilter, PropertyFilter } from './filters'

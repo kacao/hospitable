@@ -1,0 +1,15 @@
+src/
+examples/
+docs/
+.github/
+.claude/
+check-*.ts
+AGENTS.md
+CLAUDE.md
+.env*
+coverage/
+*.tsbuildinfo
+vitest.config.ts
+tsup.config.ts
+eslint.config.js
+tsconfig.json

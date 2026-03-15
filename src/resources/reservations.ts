@@ -6,6 +6,9 @@ import type {
   ReservationListParams,
 } from '../models/reservation'
 import { paginate, collectAll } from '../http/paginate'
+import { MemoryCache, cacheKey, type CacheConfig } from '../utils/cache'
+
+const DEFAULT_TTL = 60_000
 
 function diffDays(from: string, to: string): number {
   return (new Date(to).getTime() - new Date(from).getTime()) / 86_400_000
@@ -19,24 +22,57 @@ function shiftDate(dateStr: string, days: number): string {
 
 const CONCURRENT_BATCH_SIZE = 5
 
+function normalizeListParams(params: ReservationListParams) {
+  return {
+    page: params.page,
+    properties: params.properties,
+    startDate: params.startDate,
+    endDate: params.endDate,
+    status: Array.isArray(params.status) ? params.status.join(',') : params.status,
+    include: params.include,
+    perPage: params.perPage,
+  }
+}
+
 export class ReservationsResource {
-  constructor(private readonly http: HttpClient) {}
+  private cache: MemoryCache<unknown> | null
+
+  constructor(
+    private readonly http: HttpClient,
+    cacheConfig?: CacheConfig,
+  ) {
+    const enabled = cacheConfig?.enabled ?? false
+    this.cache = enabled
+      ? new MemoryCache({ ttl: cacheConfig?.ttl ?? DEFAULT_TTL, maxSize: cacheConfig?.maxSize })
+      : null
+  }
+
+  private fetchList(params: ReservationListParams = {}): Promise<ReservationList> {
+    const normalized = normalizeListParams(params)
+    return this.http.get<ReservationList>('/v2/reservations', normalized as RequestOptions['params'])
+  }
 
   async list(params: ReservationListParams = {}): Promise<ReservationList> {
-    const { properties, startDate, endDate, status, include, perPage, page } = params
-    return this.http.get<ReservationList>('/v2/reservations', {
-      page,
-      properties,
-      startDate,
-      endDate,
-      status: Array.isArray(status) ? status.join(',') : status,
-      include,
-      perPage,
-    } as RequestOptions['params'])
+    const normalized = normalizeListParams(params)
+    const key = cacheKey('reservations:list', normalized as unknown as Record<string, unknown>)
+    if (this.cache) {
+      const cached = this.cache.get(key) as ReservationList | undefined
+      if (cached) return cached
+    }
+    const result = await this.fetchList(params)
+    this.cache?.set(key, result)
+    return result
   }
 
   async get(id: string, include?: string): Promise<Reservation> {
-    return this.http.get<Reservation>(`/v2/reservations/${id}`, include ? { include } : undefined)
+    const key = cacheKey('reservations:get', { id, include })
+    if (this.cache) {
+      const cached = this.cache.get(key) as Reservation | undefined
+      if (cached) return cached
+    }
+    const result = await this.http.get<Reservation>(`/v2/reservations/${id}`, include ? { include } : undefined)
+    this.cache?.set(key, result)
+    return result
   }
 
   async getUpcoming(
@@ -68,7 +104,7 @@ export class ReservationsResource {
         const results = await Promise.all(
           batch.map(async (propId) => {
             const items = await collectAll<Reservation, ReservationListParams>(
-              p => this.list(p),
+              p => this.fetchList(p),
               { startDate: fetchStart, endDate, status: ['accepted', 'confirmed'], properties: [propId] },
             )
             return items.map(res => ({ ...res, propertyId: propId }))
@@ -124,6 +160,10 @@ export class ReservationsResource {
   }
 
   async *iter(params: Omit<ReservationListParams, 'page'> = {}): AsyncGenerator<Reservation> {
-    yield* paginate<Reservation, ReservationListParams>(p => this.list(p), params)
+    yield* paginate<Reservation, ReservationListParams>(p => this.fetchList(p), params)
+  }
+
+  clearCache(): void {
+    this.cache?.clear()
   }
 }
