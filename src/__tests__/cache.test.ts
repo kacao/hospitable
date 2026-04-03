@@ -320,7 +320,7 @@ describe('ReservationsResource caching', () => {
     expect(http.get).toHaveBeenCalledTimes(1)
   })
 
-  it('normalizes status array to string for cache key consistency', async () => {
+  it('normalizes status to array for cache key consistency', async () => {
     const http = makeHttpClient()
     const resource = new ReservationsResource(http, { enabled: true, ttl: 30_000 })
     const list = {

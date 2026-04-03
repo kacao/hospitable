@@ -89,26 +89,96 @@ describe('ReservationsResource', () => {
       }))
     })
 
-    it('joins status array as comma-separated string', async () => {
+    it('preserves status array for API', async () => {
       const list = makeList([])
       vi.mocked(http.get).mockResolvedValue(list)
 
       await resource.list({ status: ['confirmed', 'pending'] })
 
       expect(http.get).toHaveBeenCalledWith('/v2/reservations', expect.objectContaining({
-        status: 'confirmed,pending',
+        status: ['confirmed', 'pending'],
       }))
     })
 
-    it('passes string status through unchanged', async () => {
+    it('normalizes single status string to array', async () => {
       const list = makeList([])
       vi.mocked(http.get).mockResolvedValue(list)
 
       await resource.list({ status: 'confirmed' })
 
       expect(http.get).toHaveBeenCalledWith('/v2/reservations', expect.objectContaining({
-        status: 'confirmed',
+        status: ['confirmed'],
       }))
+    })
+
+    it('keeps undefined status as undefined when not provided', async () => {
+      const list = makeList([])
+      vi.mocked(http.get).mockResolvedValue(list)
+
+      await resource.list({ startDate: '2026-01-01' })
+
+      expect(http.get).toHaveBeenCalledWith('/v2/reservations', expect.objectContaining({
+        status: undefined,
+      }))
+    })
+
+    it('preserves all ReservationStatus values in array', async () => {
+      const list = makeList([])
+      vi.mocked(http.get).mockResolvedValue(list)
+
+      const allStatuses = ['accepted', 'confirmed', 'pending', 'cancelled', 'declined']
+      await resource.list({ status: allStatuses })
+
+      expect(http.get).toHaveBeenCalledWith('/v2/reservations', expect.objectContaining({
+        status: allStatuses,
+      }))
+    })
+
+    it('preserves order of status array elements', async () => {
+      const list = makeList([])
+      vi.mocked(http.get).mockResolvedValue(list)
+
+      await resource.list({ status: ['declined', 'accepted', 'pending'] })
+
+      expect(http.get).toHaveBeenCalledWith('/v2/reservations', expect.objectContaining({
+        status: ['declined', 'accepted', 'pending'],
+      }))
+    })
+
+    it('does not mutate the original params object', async () => {
+      const list = makeList([])
+      vi.mocked(http.get).mockResolvedValue(list)
+
+      const params = { status: ['accepted', 'confirmed'] as string | string[], startDate: '2026-01-01' }
+      await resource.list(params)
+
+      expect(params.status).toEqual(['accepted', 'confirmed'])
+      expect(params.startDate).toBe('2026-01-01')
+    })
+
+    it('passes all params through normalization correctly', async () => {
+      const list = makeList([])
+      vi.mocked(http.get).mockResolvedValue(list)
+
+      await resource.list({
+        page: 2,
+        properties: ['prop-1', 'prop-2'],
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+        status: ['accepted', 'confirmed'],
+        include: 'guest,properties',
+        perPage: 50,
+      })
+
+      expect(http.get).toHaveBeenCalledWith('/v2/reservations', {
+        page: 2,
+        properties: ['prop-1', 'prop-2'],
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+        status: ['accepted', 'confirmed'],
+        include: 'guest,properties',
+        perPage: 50,
+      })
     })
   })
 
@@ -143,7 +213,7 @@ describe('ReservationsResource', () => {
       const call = vi.mocked(http.get).mock.calls[0]!
       const params = call[1] as Record<string, unknown>
 
-      expect(params['status']).toBe('accepted')
+      expect(params['status']).toEqual(['accepted'])
       expect(params['include']).toBe('guest,properties')
       expect(params['properties']).toEqual(['prop1'])
     })
@@ -199,6 +269,20 @@ describe('ReservationsResource', () => {
       expect(items[1]!.id).toBe('res-2')
       expect(items[2]!.id).toBe('res-3')
       expect(http.get).toHaveBeenCalledTimes(2)
+    })
+
+    it('passes status array params through to paginated requests', async () => {
+      const page1 = makeList([makeReservation({ id: 'res-1' })], 1, 1)
+      vi.mocked(http.get).mockResolvedValue(page1)
+
+      const items: Reservation[] = []
+      for await (const item of resource.iter({ status: ['accepted', 'confirmed'] })) {
+        items.push(item)
+      }
+
+      const call = vi.mocked(http.get).mock.calls[0]!
+      const params = call[1] as Record<string, unknown>
+      expect(params['status']).toEqual(['accepted', 'confirmed'])
     })
 
     it('passes page=2 on second page request', async () => {
@@ -296,6 +380,16 @@ describe('ReservationsResource', () => {
       const call = vi.mocked(http.get).mock.calls[0]!
       const params = call[1] as Record<string, unknown>
       expect(params['startDate']).toBe('2026-03-08')
+    })
+
+    it('passes status as array when fetching reservations for orphan detection', async () => {
+      vi.mocked(http.get).mockResolvedValue(makeList([]))
+
+      await resource.getOrphanDates('2026-03-01', '2026-03-31', 2, ['prop-1'])
+
+      const call = vi.mocked(http.get).mock.calls[0]!
+      const params = call[1] as Record<string, unknown>
+      expect(params['status']).toEqual(['accepted', 'confirmed'])
     })
 
     it('does not include a gap that falls entirely outside the requested date range', async () => {

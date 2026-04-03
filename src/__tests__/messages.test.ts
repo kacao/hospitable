@@ -1,26 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MessagesResource } from '../resources/messages'
 import type { HttpClient } from '../http/client'
-import type { Message, MessageThread, MessageTemplate } from '../models/message'
+import type { Message, MessageTemplate } from '../models/message'
 
 function makeMessage(overrides: Partial<Message> = {}): Message {
   return {
     id: 'msg-1',
+    platform: 'airbnb',
+    conversationId: 'conv-1',
     reservationId: 'res-1',
-    direction: 'outbound',
     body: 'Hello guest',
-    sentAt: '2026-02-25T10:00:00Z',
-    readAt: null,
-    senderName: 'Host',
-    ...overrides,
-  }
-}
-
-function makeThread(overrides: Partial<MessageThread> = {}): MessageThread {
-  return {
-    reservationId: 'res-1',
-    messages: [],
-    unreadCount: 0,
+    senderType: 'host',
+    senderRole: null,
+    sender: {
+      firstName: 'Host',
+      fullName: 'Host Name',
+      locale: 'en',
+      pictureUrl: null,
+      thumbnailUrl: null,
+    },
+    createdAt: '2026-02-25T10:00:00Z',
+    source: 'hospitable',
+    sentReferenceId: null,
+    attachments: [],
     ...overrides,
   }
 }
@@ -56,21 +58,29 @@ describe('MessagesResource', () => {
   })
 
   describe('list()', () => {
-    it('calls GET /v2/reservations/{id}/messages', async () => {
-      const thread = makeThread({ reservationId: 'res-42', messages: [makeMessage()] })
-      vi.mocked(http.get).mockResolvedValue(thread)
+    it('calls GET /v2/reservations/{id}/messages and unwraps .data', async () => {
+      const messages = [makeMessage()]
+      vi.mocked(http.get).mockResolvedValue({ data: messages })
 
       const result = await resource.list('res-42')
 
       expect(http.get).toHaveBeenCalledWith('/v2/reservations/res-42/messages')
-      expect(result).toBe(thread)
+      expect(result).toEqual({ reservationId: 'res-42', messages })
+    })
+
+    it('returns empty messages array when response.data is undefined', async () => {
+      vi.mocked(http.get).mockResolvedValue({ data: undefined })
+
+      const result = await resource.list('res-42')
+
+      expect(result).toEqual({ reservationId: 'res-42', messages: [] })
     })
   })
 
   describe('send()', () => {
-    it('calls POST with { body } payload and returns Message', async () => {
+    it('calls POST with { body } payload and unwraps .data', async () => {
       const msg = makeMessage({ body: 'Check-in info' })
-      vi.mocked(http.post).mockResolvedValue(msg)
+      vi.mocked(http.post).mockResolvedValue({ data: msg })
 
       const result = await resource.send('res-42', 'Check-in info')
 
@@ -78,7 +88,7 @@ describe('MessagesResource', () => {
         '/v2/reservations/res-42/messages',
         { body: 'Check-in info' },
       )
-      expect(result).toBe(msg)
+      expect(result).toEqual(msg)
     })
   })
 
@@ -97,7 +107,7 @@ describe('MessagesResource', () => {
   describe('sendTemplate()', () => {
     it('calls POST with { templateId, variables: {} } when no variables provided', async () => {
       const msg = makeMessage()
-      vi.mocked(http.post).mockResolvedValue(msg)
+      vi.mocked(http.post).mockResolvedValue({ data: msg })
 
       await resource.sendTemplate('res-42', 'tpl-1')
 
@@ -109,7 +119,7 @@ describe('MessagesResource', () => {
 
     it('passes variables through correctly', async () => {
       const msg = makeMessage()
-      vi.mocked(http.post).mockResolvedValue(msg)
+      vi.mocked(http.post).mockResolvedValue({ data: msg })
 
       await resource.sendTemplate('res-42', 'tpl-1', { name: 'Alice', checkin: '2026-03-01' })
 

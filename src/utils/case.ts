@@ -2,6 +2,10 @@ export function snakeToCamel(s: string): string {
   return s.replace(/_(\w)/g, (_, c: string) => c.toUpperCase())
 }
 
+export function camelToSnake(s: string): string {
+  return s.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`)
+}
+
 export function deepSnakeToCamel(obj: unknown, depth = 0): unknown {
   if (depth > 20) return obj
   if (Array.isArray(obj)) return obj.map(v => deepSnakeToCamel(v, depth + 1))
@@ -10,6 +14,20 @@ export function deepSnakeToCamel(obj: unknown, depth = 0): unknown {
       Object.entries(obj as Record<string, unknown>).map(([k, v]) => [
         k.includes('_') ? snakeToCamel(k) : k,
         deepSnakeToCamel(v, depth + 1),
+      ])
+    )
+  }
+  return obj
+}
+
+export function deepCamelToSnake(obj: unknown, depth = 0): unknown {
+  if (depth > 20) return obj
+  if (Array.isArray(obj)) return obj.map(v => deepCamelToSnake(v, depth + 1))
+  if (obj !== null && typeof obj === 'object') {
+    return Object.fromEntries(
+      Object.entries(obj as Record<string, unknown>).map(([k, v]) => [
+        /[A-Z]/.test(k) ? camelToSnake(k) : k,
+        deepCamelToSnake(v, depth + 1),
       ])
     )
   }

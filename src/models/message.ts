@@ -1,19 +1,29 @@
-export type MessageDirection = 'outbound' | 'inbound'
+export interface MessageSender {
+  firstName: string
+  fullName: string
+  locale: string
+  pictureUrl: string | null
+  thumbnailUrl: string | null
+}
 
 export interface Message {
-  id: string
+  id: number | string
+  platform: string
+  conversationId: string
   reservationId: string
-  direction: MessageDirection
   body: string
-  sentAt: string
-  readAt: string | null
-  senderName: string
+  senderType: string
+  senderRole: string | null
+  sender: MessageSender
+  createdAt: string
+  source: string
+  sentReferenceId: string | null
+  attachments: unknown[]
 }
 
 export interface MessageThread {
   reservationId: string
   messages: Message[]
-  unreadCount: number
 }
 
 export interface SendMessageRequest {

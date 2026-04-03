@@ -28,7 +28,7 @@ function normalizeListParams(params: ReservationListParams) {
     properties: params.properties,
     startDate: params.startDate,
     endDate: params.endDate,
-    status: Array.isArray(params.status) ? params.status.join(',') : params.status,
+    status: Array.isArray(params.status) ? params.status : params.status ? [params.status] : undefined,
     include: params.include,
     perPage: params.perPage,
   }

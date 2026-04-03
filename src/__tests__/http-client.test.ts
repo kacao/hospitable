@@ -80,6 +80,95 @@ describe('HttpClient', () => {
     })
   })
 
+  describe('status array param regression', () => {
+    it('sends status array as repeated status[] params, never comma-joined', async () => {
+      mockFetch(200, { data: [] })
+      const client = makeClient()
+      await client.get('/v2/reservations', { status: ['accepted', 'confirmed'] })
+      const url = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+      const parsed = new URL(url)
+      expect(parsed.searchParams.getAll('status[]')).toEqual(['accepted', 'confirmed'])
+      expect(url).not.toContain('accepted%2Cconfirmed')
+      expect(url).not.toContain('accepted,confirmed')
+    })
+
+    it('sends single-element status array as status[]=value', async () => {
+      mockFetch(200, { data: [] })
+      const client = makeClient()
+      await client.get('/v2/reservations', { status: ['pending'] })
+      const url = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+      const parsed = new URL(url)
+      expect(parsed.searchParams.getAll('status[]')).toEqual(['pending'])
+    })
+
+    it('sends empty array as no params', async () => {
+      mockFetch(200, { data: [] })
+      const client = makeClient()
+      await client.get('/v2/reservations', { status: [] as string[] })
+      const url = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+      expect(url).not.toContain('status')
+    })
+
+    it('sends all ReservationStatus values as separate array entries', async () => {
+      mockFetch(200, { data: [] })
+      const client = makeClient()
+      const allStatuses = ['accepted', 'confirmed', 'pending', 'cancelled', 'declined']
+      await client.get('/v2/reservations', { status: allStatuses })
+      const url = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+      const parsed = new URL(url)
+      expect(parsed.searchParams.getAll('status[]')).toEqual(allStatuses)
+    })
+
+    it('preserves string status as a scalar param (not array)', async () => {
+      mockFetch(200, { data: [] })
+      const client = makeClient()
+      await client.get('/v2/reservations', { status: 'accepted' } as Record<string, string | string[]>)
+      const url = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+      const parsed = new URL(url)
+      expect(parsed.searchParams.get('status')).toBe('accepted')
+      expect(url).not.toContain('status[]')
+    })
+  })
+
+  describe('camelCase param key to snake_case conversion', () => {
+    it('converts camelCase param keys to snake_case in URL', async () => {
+      mockFetch(200, [])
+      const client = makeClient()
+      await client.get('/v2/reservations', { startDate: '2026-01-01', endDate: '2026-12-31' })
+      const url = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+      expect(url).toContain('start_date=2026-01-01')
+      expect(url).toContain('end_date=2026-12-31')
+      expect(url).not.toContain('startDate')
+      expect(url).not.toContain('endDate')
+    })
+
+    it('converts camelCase array param keys to snake_case', async () => {
+      mockFetch(200, [])
+      const client = makeClient()
+      await client.get('/v2/properties', { propertyIds: ['a', 'b'] })
+      const url = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+      const parsed = new URL(url)
+      expect(parsed.searchParams.getAll('property_ids[]')).toEqual(['a', 'b'])
+    })
+
+    it('leaves already snake_case keys unchanged', async () => {
+      mockFetch(200, [])
+      const client = makeClient()
+      await client.get('/v2/reservations', { per_page: 50 } as Record<string, number>)
+      const url = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+      expect(url).toContain('per_page=50')
+    })
+
+    it('converts perPage to per_page', async () => {
+      mockFetch(200, [])
+      const client = makeClient()
+      await client.get('/v2/reservations', { perPage: 25 })
+      const url = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+      expect(url).toContain('per_page=25')
+      expect(url).not.toContain('perPage')
+    })
+  })
+
   describe('HTTP methods', () => {
     beforeEach(() => {
       mockFetch(200, { ok: true })
@@ -155,6 +244,86 @@ describe('HttpClient', () => {
       await client.get('/listings')
       const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
       expect(fetchCall[1].body).toBeUndefined()
+    })
+  })
+
+  describe('request body camelCase to snake_case conversion', () => {
+    it('converts camelCase body keys to snake_case on POST', async () => {
+      mockFetch(200, { ok: true })
+      const client = makeClient()
+      await client.post('/reservations', { firstName: 'John', lastName: 'Doe' })
+      const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
+      expect(JSON.parse(fetchCall[1].body)).toEqual({ first_name: 'John', last_name: 'Doe' })
+    })
+
+    it('converts nested camelCase body keys on PUT', async () => {
+      mockFetch(200, { ok: true })
+      const client = makeClient()
+      await client.put('/reservations/1', { guestInfo: { firstName: 'John', phoneNumber: '555-0100' } })
+      const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
+      expect(JSON.parse(fetchCall[1].body)).toEqual({
+        guest_info: { first_name: 'John', phone_number: '555-0100' },
+      })
+    })
+
+    it('converts camelCase keys on PATCH', async () => {
+      mockFetch(200, { ok: true })
+      const client = makeClient()
+      await client.patch('/reservations/1', { checkInTime: '15:00', arrivalDate: '2026-01-01' })
+      const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
+      const body = JSON.parse(fetchCall[1].body)
+      expect(body).toEqual({ check_in_time: '15:00', arrival_date: '2026-01-01' })
+    })
+
+    it('preserves string and number values while converting keys', async () => {
+      mockFetch(200, { ok: true })
+      const client = makeClient()
+      await client.post('/listings', { nightlyRate: 150.50, maxGuests: 4, listingName: 'Beach House' })
+      const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
+      const body = JSON.parse(fetchCall[1].body)
+      expect(body['nightly_rate']).toBe(150.50)
+      expect(body['max_guests']).toBe(4)
+      expect(body['listing_name']).toBe('Beach House')
+    })
+
+    it('converts keys in arrays within body', async () => {
+      mockFetch(200, { ok: true })
+      const client = makeClient()
+      await client.post('/bulk', { items: [{ arrivalDate: '2026-03-01' }, { arrivalDate: '2026-04-01' }] })
+      const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
+      const body = JSON.parse(fetchCall[1].body)
+      expect(body).toEqual({ items: [{ arrival_date: '2026-03-01' }, { arrival_date: '2026-04-01' }] })
+    })
+
+    it('converts body keys on 401 retry request too', async () => {
+      let fetchCallCount = 0
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(() => {
+        fetchCallCount++
+        if (fetchCallCount === 1) {
+          return Promise.resolve({
+            ok: false, status: 401,
+            headers: new Headers(),
+            json: async () => ({ message: 'Unauthorized' }),
+          })
+        }
+        return Promise.resolve({
+          ok: true, status: 200,
+          headers: new Headers(),
+          json: async () => ({ ok: true }),
+        })
+      }))
+
+      const client = new HttpClient({
+        baseURL: BASE_URL,
+        getAuthHeader: async () => AUTH_HEADER,
+        onUnauthorized: async () => {},
+        retryConfig: { maxAttempts: 1 },
+      })
+
+      await client.post('/test', { guestName: 'Alice' })
+
+      const retryCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+      expect(JSON.parse(retryCall[1].body)).toEqual({ guest_name: 'Alice' })
     })
   })
 

@@ -1,7 +1,7 @@
 import { VERSION } from '../index'
 import { withRetry, type RetryConfig } from './retry'
 import { sanitize } from '../utils/sanitize'
-import { deepSnakeToCamel } from '../utils/case'
+import { camelToSnake, deepSnakeToCamel, deepCamelToSnake } from '../utils/case'
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
@@ -41,10 +41,11 @@ function buildURL(base: string, path: string, params?: RequestOptions['params'])
   if (params) {
     for (const [key, value] of Object.entries(params)) {
       if (value === undefined) continue
+      const snakeKey = camelToSnake(key)
       if (Array.isArray(value)) {
-        value.forEach((v) => url.searchParams.append(`${key}[]`, v))
+        value.forEach((v) => url.searchParams.append(`${snakeKey}[]`, v))
       } else {
-        url.searchParams.set(key, String(value))
+        url.searchParams.set(snakeKey, String(value))
       }
     }
   }
@@ -85,7 +86,7 @@ export class HttpClient {
         const response = await fetch(url, {
           method,
           headers,
-          ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+          ...(body !== undefined ? { body: JSON.stringify(deepCamelToSnake(body)) } : {}),
         })
 
         const requestId = response.headers.get('x-request-id') ?? undefined
@@ -107,7 +108,7 @@ export class HttpClient {
             const retryResponse = await fetch(url, {
               method,
               headers: { ...headers, Authorization: freshAuth },
-              ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+              ...(body !== undefined ? { body: JSON.stringify(deepCamelToSnake(body)) } : {}),
             })
             if (retryResponse.ok) {
               return this.parseResponse<T>(retryResponse)
