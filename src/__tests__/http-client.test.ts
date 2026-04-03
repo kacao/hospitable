@@ -112,7 +112,7 @@ describe('HttpClient', () => {
     it('sends all ReservationStatus values as separate array entries', async () => {
       mockFetch(200, { data: [] })
       const client = makeClient()
-      const allStatuses = ['accepted', 'confirmed', 'pending', 'cancelled', 'declined']
+      const allStatuses = ['not_accepted', 'request', 'accepted', 'cancelled', 'checkpoint']
       await client.get('/v2/reservations', { status: allStatuses })
       const url = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
       const parsed = new URL(url)

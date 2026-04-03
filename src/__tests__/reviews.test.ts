@@ -45,46 +45,34 @@ describe('ReviewsResource', () => {
   })
 
   describe('list()', () => {
-    it('calls GET /v2/reviews with no params when called with defaults', async () => {
+    it('calls GET /v2/properties/{id}/reviews with no query params when called with defaults', async () => {
       const list = makeList([])
       vi.mocked(http.get).mockResolvedValue(list)
 
-      const result = await resource.list()
+      const result = await resource.list('prop-1')
 
-      expect(http.get).toHaveBeenCalledWith('/v2/reviews', {})
+      expect(http.get).toHaveBeenCalledWith('/v2/properties/prop-1/reviews', {})
       expect(result).toBe(list)
     })
 
-    it('passes propertyId and responded params through', async () => {
+    it('passes responded and include params through', async () => {
       const list = makeList([])
       vi.mocked(http.get).mockResolvedValue(list)
 
-      await resource.list({ propertyId: 'x', responded: false })
+      await resource.list('prop-1', { responded: false, include: 'guest' })
 
-      expect(http.get).toHaveBeenCalledWith('/v2/reviews', { propertyId: 'x', responded: false })
-    })
-  })
-
-  describe('get()', () => {
-    it('calls GET /v2/reviews/{id}', async () => {
-      const review = makeReview({ id: 'rev-42' })
-      vi.mocked(http.get).mockResolvedValue(review)
-
-      const result = await resource.get('rev-42')
-
-      expect(http.get).toHaveBeenCalledWith('/v2/reviews/rev-42')
-      expect(result).toBe(review)
+      expect(http.get).toHaveBeenCalledWith('/v2/properties/prop-1/reviews', { responded: false, include: 'guest' })
     })
   })
 
   describe('respond()', () => {
-    it('POSTs to /v2/reviews/{id}/response with { response: text }', async () => {
+    it('POSTs to /v2/reviews/{id}/respond with { response: text }', async () => {
       const updated = makeReview({ response: 'Thank you!', respondedAt: '2026-01-02T00:00:00Z' })
       vi.mocked(http.post).mockResolvedValue(updated)
 
       const result = await resource.respond('rev-1', 'Thank you!')
 
-      expect(http.post).toHaveBeenCalledWith('/v2/reviews/rev-1/response', { response: 'Thank you!' })
+      expect(http.post).toHaveBeenCalledWith('/v2/reviews/rev-1/respond', { response: 'Thank you!' })
       expect(result).toBe(updated)
     })
   })
@@ -103,7 +91,7 @@ describe('ReviewsResource', () => {
         .mockResolvedValueOnce(page2)
 
       const items: Review[] = []
-      for await (const item of resource.iter()) {
+      for await (const item of resource.iter('prop-1')) {
         items.push(item)
       }
 
@@ -122,7 +110,7 @@ describe('ReviewsResource', () => {
         .mockResolvedValueOnce(page1)
         .mockResolvedValueOnce(page2)
 
-      for await (const _ of resource.iter()) {
+      for await (const _ of resource.iter('prop-1')) {
         // consume
       }
 
@@ -142,7 +130,7 @@ describe('ReviewsResource', () => {
 
       const items: Review[] = []
       await expect(async () => {
-        for await (const item of resource.iter()) {
+        for await (const item of resource.iter('prop-1')) {
           items.push(item)
         }
       }).rejects.toThrow('Network failure')

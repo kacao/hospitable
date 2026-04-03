@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ReservationsResource } from '../resources/reservations'
 import type { HttpClient } from '../http/client'
 import type { ReservationList, Reservation } from '../models/reservation'
-import type { OrphanDate } from '../models/reservation'
 import { makeHttpClient } from './helpers'
 
 function makeReservation(overrides: Partial<Reservation> = {}): Reservation {
@@ -126,7 +125,7 @@ describe('ReservationsResource', () => {
       const list = makeList([])
       vi.mocked(http.get).mockResolvedValue(list)
 
-      const allStatuses = ['accepted', 'confirmed', 'pending', 'cancelled', 'declined']
+      const allStatuses = ['not_accepted', 'request', 'accepted', 'cancelled', 'checkpoint']
       await resource.list({ status: allStatuses })
 
       expect(http.get).toHaveBeenCalledWith('/v2/reservations', expect.objectContaining({
@@ -304,102 +303,4 @@ describe('ReservationsResource', () => {
     })
   })
 
-  describe('getOrphanDates()', () => {
-    it('returns empty array when no reservations exist', async () => {
-      vi.mocked(http.get).mockResolvedValue(makeList([]))
-      const result = await resource.getOrphanDates('2026-03-01', '2026-03-31')
-      expect(result).toEqual([])
-    })
-
-    it('detects a 1-day gap between two reservations on the same property', async () => {
-      const before = makeReservation({ id: 'res-a', propertyId: 'prop-1', arrivalDate: '2026-03-01', departureDate: '2026-03-05' })
-      const after  = makeReservation({ id: 'res-b', propertyId: 'prop-1', arrivalDate: '2026-03-06', departureDate: '2026-03-10' })
-      vi.mocked(http.get).mockResolvedValue(makeList([before, after]))
-
-      const result = await resource.getOrphanDates('2026-03-01', '2026-03-31')
-
-      expect(result).toHaveLength(1)
-      expect(result[0]).toMatchObject<OrphanDate>({
-        count: 1,
-        propertyId: 'prop-1',
-        reservationBefore: before,
-        reservationAfter: after,
-      })
-    })
-
-    it('detects a 2-day gap and returns count=2', async () => {
-      const before = makeReservation({ id: 'res-a', propertyId: 'prop-1', arrivalDate: '2026-03-01', departureDate: '2026-03-05' })
-      const after  = makeReservation({ id: 'res-b', propertyId: 'prop-1', arrivalDate: '2026-03-07', departureDate: '2026-03-10' })
-      vi.mocked(http.get).mockResolvedValue(makeList([before, after]))
-
-      const result = await resource.getOrphanDates('2026-03-01', '2026-03-31')
-
-      expect(result[0]!.count).toBe(2)
-    })
-
-    it('ignores gaps larger than maxOrphanDays', async () => {
-      const before = makeReservation({ id: 'res-a', propertyId: 'prop-1', arrivalDate: '2026-03-01', departureDate: '2026-03-05' })
-      const after  = makeReservation({ id: 'res-b', propertyId: 'prop-1', arrivalDate: '2026-03-10', departureDate: '2026-03-15' })
-      vi.mocked(http.get).mockResolvedValue(makeList([before, after]))
-
-      const result = await resource.getOrphanDates('2026-03-01', '2026-03-31')
-
-      expect(result).toHaveLength(0)
-    })
-
-    it('respects custom maxOrphanDays=3', async () => {
-      const before = makeReservation({ id: 'res-a', propertyId: 'prop-1', arrivalDate: '2026-03-01', departureDate: '2026-03-05' })
-      const after  = makeReservation({ id: 'res-b', propertyId: 'prop-1', arrivalDate: '2026-03-08', departureDate: '2026-03-12' })
-      vi.mocked(http.get).mockResolvedValue(makeList([before, after]))
-
-      const result = await resource.getOrphanDates('2026-03-01', '2026-03-31', 3)
-
-      expect(result).toHaveLength(1)
-      expect(result[0]!.count).toBe(3)
-    })
-
-    it('reports orphans per property independently', async () => {
-      const p1a = makeReservation({ id: 'p1a', propertyId: 'prop-1', arrivalDate: '2026-03-01', departureDate: '2026-03-05' })
-      const p1b = makeReservation({ id: 'p1b', propertyId: 'prop-1', arrivalDate: '2026-03-06', departureDate: '2026-03-10' })
-      const p2a = makeReservation({ id: 'p2a', propertyId: 'prop-2', arrivalDate: '2026-03-01', departureDate: '2026-03-08' })
-      const p2b = makeReservation({ id: 'p2b', propertyId: 'prop-2', arrivalDate: '2026-03-09', departureDate: '2026-03-15' })
-      vi.mocked(http.get).mockResolvedValue(makeList([p1a, p1b, p2a, p2b]))
-
-      const result = await resource.getOrphanDates('2026-03-01', '2026-03-31')
-
-      expect(result).toHaveLength(2)
-      const propIds = result.map(o => o.propertyId).sort()
-      expect(propIds).toEqual(['prop-1', 'prop-2'])
-    })
-
-    it('expands fetch start by maxOrphanDays to catch bordering reservations', async () => {
-      vi.mocked(http.get).mockResolvedValue(makeList([]))
-
-      await resource.getOrphanDates('2026-03-10', '2026-03-31')
-
-      const call = vi.mocked(http.get).mock.calls[0]!
-      const params = call[1] as Record<string, unknown>
-      expect(params['startDate']).toBe('2026-03-08')
-    })
-
-    it('passes status as array when fetching reservations for orphan detection', async () => {
-      vi.mocked(http.get).mockResolvedValue(makeList([]))
-
-      await resource.getOrphanDates('2026-03-01', '2026-03-31', 2, ['prop-1'])
-
-      const call = vi.mocked(http.get).mock.calls[0]!
-      const params = call[1] as Record<string, unknown>
-      expect(params['status']).toEqual(['accepted', 'confirmed'])
-    })
-
-    it('does not include a gap that falls entirely outside the requested date range', async () => {
-      const before = makeReservation({ id: 'res-a', propertyId: 'prop-1', arrivalDate: '2026-02-20', departureDate: '2026-02-25' })
-      const after  = makeReservation({ id: 'res-b', propertyId: 'prop-1', arrivalDate: '2026-02-26', departureDate: '2026-03-01' })
-      vi.mocked(http.get).mockResolvedValue(makeList([before, after]))
-
-      const result = await resource.getOrphanDates('2026-03-10', '2026-03-31')
-
-      expect(result).toHaveLength(0)
-    })
-  })
 })

@@ -1,9 +1,9 @@
 export type ReservationStatus =
+  | 'not_accepted'
+  | 'request'
   | 'accepted'
-  | 'confirmed'
-  | 'pending'
   | 'cancelled'
-  | 'declined'
+  | 'checkpoint'
   | string
 
 export type ReservationPlatform = 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | string
@@ -52,13 +52,6 @@ export interface Reservation {
 }
 
 export type ReservationList = import('./pagination').PaginatedResponse<Reservation>
-
-export interface OrphanDate {
-  count: number
-  propertyId: string
-  reservationBefore: Reservation
-  reservationAfter: Reservation
-}
 
 export interface ReservationListParams {
   properties?: string[]

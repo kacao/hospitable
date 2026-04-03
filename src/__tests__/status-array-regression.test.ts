@@ -66,7 +66,7 @@ describe('status array regression — integration', () => {
     it('sends all five status values as separate array entries', async () => {
       const calls = captureFetch(200, EMPTY_LIST)
       const client = new HospitableClient({ token: 'test' })
-      const allStatuses = ['accepted', 'confirmed', 'pending', 'cancelled', 'declined']
+      const allStatuses = ['not_accepted', 'request', 'accepted', 'cancelled', 'checkpoint']
 
       await client.reservations.list({ status: allStatuses })
 
