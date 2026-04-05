@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ReviewsResource } from '../resources/reviews'
 import type { HttpClient } from '../http/client'
 import type { Review, ReviewList } from '../models/review'
+import { NotFoundError, RateLimitError } from '../errors'
 import { makeHttpClient } from './helpers'
 
 function makeReview(overrides: Partial<Review> = {}): Review {
@@ -74,6 +75,18 @@ describe('ReviewsResource', () => {
 
       expect(http.post).toHaveBeenCalledWith('/v2/reviews/rev-1/respond', { response: 'Thank you!' })
       expect(result).toBe(updated)
+    })
+
+    it('throws NotFoundError when review does not exist', async () => {
+      vi.mocked(http.post).mockRejectedValue(new NotFoundError('Review not found', 'req-1'))
+
+      await expect(resource.respond('rev-nonexistent', 'Thanks!')).rejects.toThrow(NotFoundError)
+    })
+
+    it('throws RateLimitError when rate limited', async () => {
+      vi.mocked(http.post).mockRejectedValue(new RateLimitError(30, 'req-2'))
+
+      await expect(resource.respond('rev-1', 'Thanks!')).rejects.toThrow(RateLimitError)
     })
   })
 

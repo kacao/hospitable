@@ -3,7 +3,7 @@ import type {
   Message,
   MessageThread,
   MessageTemplate,
-  SendMessageRequest,
+  SendMessageOptions,
 } from '../models/message'
 
 export class MessagesResource {
@@ -17,8 +17,8 @@ export class MessagesResource {
     }
   }
 
-  async send(reservationId: string, body: string): Promise<Message> {
-    const payload: SendMessageRequest = { body }
+  async send(reservationId: string, body: string, options?: SendMessageOptions): Promise<Message> {
+    const payload: { body: string } & SendMessageOptions = { body, ...options }
     const response = await this.http.post<{ data: Message }>(`/v2/reservations/${reservationId}/messages`, payload)
     return response.data
   }

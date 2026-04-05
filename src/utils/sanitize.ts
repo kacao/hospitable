@@ -1,4 +1,4 @@
-const PII_FIELD_PATTERN = /^(email|phone|firstName|lastName|passportNumber|fullName|dateOfBirth|guestName|displayName|hostName)$/i
+const PII_FIELD_PATTERN = /^(email|phone|firstName|lastName|passportNumber|fullName|dateOfBirth|guestName|displayName|hostName|senderId)$/i
 const SENSITIVE_PATTERN = /token|secret|password|credential|apiKey|api_key/i
 
 /**

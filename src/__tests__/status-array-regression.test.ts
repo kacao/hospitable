@@ -45,10 +45,10 @@ describe('status array regression — integration', () => {
       const calls = captureFetch(200, EMPTY_LIST)
       const client = new HospitableClient({ token: 'test' })
 
-      await client.reservations.list({ status: ['accepted', 'confirmed'] })
+      await client.reservations.list({ status: ['accepted', 'request'] })
 
       const url = new URL(calls[0]!.url)
-      expect(url.searchParams.getAll('status[]')).toEqual(['accepted', 'confirmed'])
+      expect(url.searchParams.getAll('status[]')).toEqual(['accepted', 'request'])
       expect(calls[0]!.url).not.toContain('accepted%2Cconfirmed')
       expect(calls[0]!.url).not.toContain('accepted,confirmed')
     })
@@ -57,10 +57,10 @@ describe('status array regression — integration', () => {
       const calls = captureFetch(200, EMPTY_LIST)
       const client = new HospitableClient({ token: 'test' })
 
-      await client.reservations.list({ status: 'pending' })
+      await client.reservations.list({ status: 'request' })
 
       const url = new URL(calls[0]!.url)
-      expect(url.searchParams.getAll('status[]')).toEqual(['pending'])
+      expect(url.searchParams.getAll('status[]')).toEqual(['request'])
     })
 
     it('sends all five status values as separate array entries', async () => {
@@ -90,12 +90,12 @@ describe('status array regression — integration', () => {
       const client = new HospitableClient({ token: 'test' })
 
       await client.reservations.list({
-        status: ['accepted', 'confirmed'],
+        status: ['accepted', 'request'],
         properties: ['prop-1', 'prop-2'],
       })
 
       const url = new URL(calls[0]!.url)
-      expect(url.searchParams.getAll('status[]')).toEqual(['accepted', 'confirmed'])
+      expect(url.searchParams.getAll('status[]')).toEqual(['accepted', 'request'])
       expect(url.searchParams.getAll('properties[]')).toEqual(['prop-1', 'prop-2'])
     })
 
@@ -265,6 +265,34 @@ describe('status array regression — integration', () => {
       const body = JSON.parse(calls[0]!.init.body as string)
       expect(body).toEqual({ body: 'Check-in info' })
     })
+
+    it('converts senderId to sender_id on the wire', async () => {
+      const apiResponse = {
+        data: {
+          id: 1,
+          platform: 'airbnb',
+          conversation_id: 'conv-1',
+          reservation_id: 'res-42',
+          body: 'Hello',
+          sender_type: 'host',
+          sender_role: null,
+          sender: { first_name: 'Host', full_name: 'Host Name', locale: 'en', picture_url: null, thumbnail_url: null },
+          created_at: '2026-03-01T10:00:00Z',
+          source: 'hospitable',
+          sent_reference_id: null,
+          attachments: [],
+        },
+      }
+
+      const calls = captureFetch(200, apiResponse)
+      const client = new HospitableClient({ token: 'test' })
+
+      await client.messages.send('res-42', 'Hello', { senderId: '51018147' })
+
+      const body = JSON.parse(calls[0]!.init.body as string)
+      expect(body).toEqual({ body: 'Hello', sender_id: '51018147' })
+      expect(body).not.toHaveProperty('senderId')
+    })
   })
 
   describe('ReservationFilter → resource → wire format', () => {
@@ -277,14 +305,14 @@ describe('status array regression — integration', () => {
       const filter = new ReservationFilter()
         .checkinAfter('2026-01-01')
         .checkinBefore('2026-12-31')
-        .status(['accepted', 'confirmed'])
+        .status(['accepted', 'request'])
         .properties(['prop-1'])
         .perPage(50)
 
       await client.reservations.list(filter.toParams())
 
       const url = new URL(calls[0]!.url)
-      expect(url.searchParams.getAll('status[]')).toEqual(['accepted', 'confirmed'])
+      expect(url.searchParams.getAll('status[]')).toEqual(['accepted', 'request'])
       expect(url.searchParams.getAll('properties[]')).toEqual(['prop-1'])
       expect(url.searchParams.get('start_date')).toBe('2026-01-01')
       expect(url.searchParams.get('end_date')).toBe('2026-12-31')
@@ -297,11 +325,11 @@ describe('status array regression — integration', () => {
       const calls = captureFetch(200, EMPTY_LIST)
       const client = new HospitableClient({ token: 'test' })
 
-      const filter = new ReservationFilter().status('confirmed')
+      const filter = new ReservationFilter().status('request')
       await client.reservations.list(filter.toParams())
 
       const url = new URL(calls[0]!.url)
-      expect(url.searchParams.getAll('status[]')).toEqual(['confirmed'])
+      expect(url.searchParams.getAll('status[]')).toEqual(['request'])
     })
   })
 
@@ -313,7 +341,7 @@ describe('status array regression — integration', () => {
         links: { first: null, last: null, prev: null, next: 'next' },
       }
       const page2 = {
-        data: [{ id: 'res-2', property_id: 'p1', code: 'C2', platform: 'airbnb', platform_id: 'a2', booking_date: '2026-01-02', arrival_date: '2026-03-10', departure_date: '2026-03-15', check_in: '15:00', check_out: '11:00', nights: 5, stay_type: 'guest', owner_stay: null, status: 'confirmed', guests: { total: 1, adult_count: 1, child_count: 0, infant_count: 0, pet_count: 0 }, notes: null, conversation_id: 'c2', conversation_language: null, last_message_at: null, issue_alert: null }],
+        data: [{ id: 'res-2', property_id: 'p1', code: 'C2', platform: 'airbnb', platform_id: 'a2', booking_date: '2026-01-02', arrival_date: '2026-03-10', departure_date: '2026-03-15', check_in: '15:00', check_out: '11:00', nights: 5, stay_type: 'guest', owner_stay: null, status: 'accepted', guests: { total: 1, adult_count: 1, child_count: 0, infant_count: 0, pet_count: 0 }, notes: null, conversation_id: 'c2', conversation_language: null, last_message_at: null, issue_alert: null }],
         meta: { current_page: 2, last_page: 2, per_page: 1, total: 2 },
         links: { first: null, last: null, prev: null, next: null },
       }
@@ -333,7 +361,7 @@ describe('status array regression — integration', () => {
 
       const client = new HospitableClient({ token: 'test' })
       const items = []
-      for await (const res of client.reservations.iter({ status: ['accepted', 'confirmed'] })) {
+      for await (const res of client.reservations.iter({ status: ['accepted', 'request'] })) {
         items.push(res)
       }
 
@@ -341,7 +369,7 @@ describe('status array regression — integration', () => {
 
       for (const url of calls) {
         const parsed = new URL(url)
-        expect(parsed.searchParams.getAll('status[]')).toEqual(['accepted', 'confirmed'])
+        expect(parsed.searchParams.getAll('status[]')).toEqual(['accepted', 'request'])
         expect(url).not.toContain('accepted%2Cconfirmed')
       }
     })

@@ -26,8 +26,8 @@ export interface MessageThread {
   messages: Message[]
 }
 
-export interface SendMessageRequest {
-  body: string
+export interface SendMessageOptions {
+  senderId?: string
 }
 
 export interface MessageTemplate {
