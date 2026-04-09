@@ -39,7 +39,7 @@ describe('TokenManager', () => {
   afterEach(() => {
     globalThis.fetch = originalFetch
     vi.restoreAllMocks()
-    delete process.env['HOSPITABLE_PAT']
+    delete process.env['HOSPITABLE_API_PAT']
   })
 
   describe('PAT mode', () => {
@@ -187,20 +187,6 @@ describe('TokenManager', () => {
       )
     })
 
-    it('7c. throws "no access token" error when token is set but refresh config missing', async () => {
-      const mockFetch = makeFetchMock({ ok: true })
-      vi.stubGlobal('fetch', mockFetch)
-
-      // Simulate a TokenManager that somehow has no token and can't refresh
-      // The "No access token available" error path is reached when refresh succeeds
-      // but returns no access_token — or when token is null after a failed refresh
-      // In practice, the doRefresh error surfaces first. Test the direct throw:
-      const tm = new TokenManager({ baseURL: 'https://api.hospitable.com' })
-
-      // The error thrown describes why refresh cannot proceed
-      await expect(tm.getAuthHeader()).rejects.toThrow('clientId and clientSecret are required')
-    })
-
     it('7b. throws descriptive error when refresh attempted without clientId/clientSecret', async () => {
       const mockFetch = makeFetchMock({ ok: true })
       vi.stubGlobal('fetch', mockFetch)
@@ -263,11 +249,13 @@ describe('TokenManager', () => {
   })
 
   describe('failed refresh', () => {
-    it('throws when token endpoint returns non-ok response', async () => {
+    it('throws a sanitized error (without the raw response body) when token endpoint returns non-ok', async () => {
       const mockFetch = makeFetchMock({
         ok: false,
         status: 401,
-        text: () => Promise.resolve('Unauthorized'),
+        // Response body echoes back a sensitive-looking value to prove it
+        // is NOT embedded in the thrown error message.
+        text: () => Promise.resolve('{"error":"invalid_client","error_description":"client_secret=s3cret"}'),
       })
       vi.stubGlobal('fetch', mockFetch)
 
@@ -277,16 +265,22 @@ describe('TokenManager', () => {
         baseURL: 'https://api.hospitable.com',
       })
 
-      await expect(tm.getAuthHeader()).rejects.toThrow('Token refresh failed (401): Unauthorized')
+      const err = await tm.getAuthHeader().catch((e: unknown) => e) as Error
+      expect(err.message).toBe('Token refresh failed (401)')
+      // Regression guard: the raw body must not leak into the thrown message,
+      // because callers frequently log errors and the body may contain PII
+      // or credentials echoed back by the OAuth server.
+      expect(err.message).not.toContain('client_secret')
+      expect(err.message).not.toContain('invalid_client')
     })
   })
 
   describe('environment variable fallback', () => {
-    it('9. uses HOSPITABLE_PAT env var when no token provided', async () => {
+    it('9. uses HOSPITABLE_API_PAT env var when no token provided', async () => {
       const mockFetch = makeFetchMock({ ok: true })
       vi.stubGlobal('fetch', mockFetch)
 
-      process.env['HOSPITABLE_PAT'] = 'env-pat-token'
+      process.env['HOSPITABLE_API_PAT'] = 'env-pat-token'
 
       const tm = new TokenManager({ baseURL: 'https://api.hospitable.com' })
       const header = await tm.getAuthHeader()
@@ -295,8 +289,8 @@ describe('TokenManager', () => {
       expect(mockFetch).not.toHaveBeenCalled()
     })
 
-    it('explicit token in config takes priority over HOSPITABLE_PAT env var', async () => {
-      process.env['HOSPITABLE_PAT'] = 'env-pat'
+    it('explicit token in config takes priority over HOSPITABLE_API_PAT env var', async () => {
+      process.env['HOSPITABLE_API_PAT'] = 'env-pat'
       const tm = new TokenManager({ token: 'config-token', baseURL: 'https://api.hospitable.com' })
       const header = await tm.getAuthHeader()
       expect(header).toBe('Bearer config-token')
@@ -305,7 +299,7 @@ describe('TokenManager', () => {
     it('env var PAT sets Infinity expiry (never refreshes)', async () => {
       const mockFetch = vi.fn()
       vi.stubGlobal('fetch', mockFetch)
-      process.env['HOSPITABLE_PAT'] = 'env-token'
+      process.env['HOSPITABLE_API_PAT'] = 'env-token'
       const tm = new TokenManager({ baseURL: 'https://api.hospitable.com' })
       await tm.getAuthHeader()
       await tm.getAuthHeader()

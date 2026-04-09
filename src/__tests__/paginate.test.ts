@@ -64,6 +64,19 @@ describe('paginate', () => {
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 
+  it('lastPage = 0 edge case (malformed API response) — yields first-page data then stops cleanly', async () => {
+    // Some upstreams have been observed returning `lastPage: 0` alongside a
+    // non-empty `data` array. The loop must still surface the items and then
+    // terminate rather than looping forever or swallowing the page.
+    const fetcher = vi.fn().mockResolvedValueOnce(makePage([42], 1, 0))
+    const results: number[] = []
+    for await (const item of paginate<number, TestParams>(fetcher, {})) {
+      results.push(item)
+    }
+    expect(results).toEqual([42])
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
   it('lazy evaluation: fetcher is only called when iterator is consumed', async () => {
     const fetcher = vi
       .fn()
@@ -114,7 +127,7 @@ describe('paginate', () => {
 })
 
 describe('collectAll', () => {
-  it('returns flattened array across pages', async () => {
+  it('returns flattened array across pages (fetcher form)', async () => {
     const fetcher = vi
       .fn()
       .mockResolvedValueOnce(makePage([1, 2], 1, 3))
@@ -125,7 +138,26 @@ describe('collectAll', () => {
     expect(fetcher).toHaveBeenCalledTimes(3)
   })
 
-  it('collectAll() rejects when fetcher throws mid-way', async () => {
+  it('drains an async iterable directly (iterable form)', async () => {
+    async function* source(): AsyncGenerator<number> {
+      yield 1
+      yield 2
+      yield 3
+    }
+    const result = await collectAll(source())
+    expect(result).toEqual([1, 2, 3])
+  })
+
+  it('drains a paginate() generator end-to-end (common SDK usage pattern)', async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(makePage(['a'], 1, 2))
+      .mockResolvedValueOnce(makePage(['b'], 2, 2))
+    const result = await collectAll(paginate<string, TestParams>(fetcher, {}))
+    expect(result).toEqual(['a', 'b'])
+  })
+
+  it('rejects when fetcher throws mid-way', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(makePage([1, 2], 1, 2))
       .mockRejectedValueOnce(new Error('API down'))

@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { HttpClient, HttpError } from '../http/client'
+import { HttpClient } from '../http/client'
+import {
+  HospitableError,
+  AuthenticationError,
+  NotFoundError,
+  ValidationError,
+  RateLimitError,
+  ServerError,
+} from '../errors'
 import { VERSION } from '../index'
 
 const BASE_URL = 'https://public.api.hospitable.com'
@@ -328,74 +336,83 @@ describe('HttpClient', () => {
   })
 
   describe('error handling', () => {
-    it('throws HttpError with correct statusCode on 404', async () => {
+    it('throws NotFoundError on 404', async () => {
       mockFetch(404, { message: 'Not found' })
       const client = makeClient()
-      await expect(client.get('/listings/999')).rejects.toMatchObject({
-        name: 'HttpError',
-        statusCode: 404,
-        message: 'Not found',
-      })
+      const err = await client.get('/listings/999').catch((e) => e)
+      expect(err).toBeInstanceOf(NotFoundError)
+      expect(err).toBeInstanceOf(HospitableError)
+      expect(err.statusCode).toBe(404)
+      expect(err.message).toBe('Not found')
     })
 
-    it('throws HttpError with correct statusCode on 401', async () => {
+    it('throws AuthenticationError on 401 (no onUnauthorized)', async () => {
       mockFetch(401, { message: 'Unauthorized' })
       const client = makeClient()
-      await expect(client.get('/me')).rejects.toMatchObject({
-        name: 'HttpError',
-        statusCode: 401,
-        message: 'Unauthorized',
-      })
+      const err = await client.get('/me').catch((e) => e)
+      expect(err).toBeInstanceOf(AuthenticationError)
+      expect(err.statusCode).toBe(401)
+      expect(err.message).toBe('Unauthorized')
     })
 
-    it('throws with correct statusCode on 500', async () => {
+    it('throws ValidationError with fields on 422', async () => {
+      mockFetch(422, { message: 'Invalid', errors: { email: ['is required'] } })
+      const client = makeClient()
+      const err = await client.get('/listings').catch((e) => e)
+      expect(err).toBeInstanceOf(ValidationError)
+      expect(err.statusCode).toBe(422)
+      expect((err as ValidationError).fields).toEqual({ email: ['is required'] })
+    })
+
+    it('normalizes snake_case error bodies — ValidationError.fields works from API-shape payloads', async () => {
+      mockFetch(422, { message: 'Invalid', errors: { first_name: ['is required'] } })
+      const client = makeClient()
+      const err = await client.get('/listings').catch((e) => e)
+      expect((err as ValidationError).fields).toEqual({ firstName: ['is required'] })
+    })
+
+    it('throws RateLimitError with retryAfter on 429', async () => {
+      mockFetch(429, { message: 'Too many', retryAfter: 45 })
+      const client = new HttpClient({
+        baseURL: BASE_URL,
+        getAuthHeader: async () => AUTH_HEADER,
+        retryConfig: { maxAttempts: 1 },
+      })
+      const err = await client.get('/listings').catch((e) => e)
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect((err as RateLimitError).retryAfter).toBe(45)
+    })
+
+    it('maps 5xx responses to ServerError', async () => {
       mockFetch(500, { message: 'Internal server error' })
       const client = makeClient()
-      await expect(client.get('/listings')).rejects.toMatchObject({
-        statusCode: 500,
-      })
+      const err = await client.get('/listings').catch((e) => e)
+      expect(err).toBeInstanceOf(ServerError)
+      expect(err.statusCode).toBe(500)
     })
 
-    it('uses fallback message when body has no message field', async () => {
+    it('uses fallback HTTP message when body has no message field', async () => {
       mockFetch(503, {})
       const client = makeClient()
-      await expect(client.get('/listings')).rejects.toMatchObject({
-        statusCode: 503,
-        message: 'HTTP 503',
-      })
+      const err = await client.get('/listings').catch((e) => e)
+      expect(err).toBeInstanceOf(ServerError)
+      expect(err.statusCode).toBe(503)
+      expect(err.message).toBe('HTTP 503')
     })
 
-    it('captures x-request-id in HttpError.requestId', async () => {
+    it('captures x-request-id on the typed error', async () => {
       mockFetch(422, { message: 'Validation failed' }, { 'x-request-id': 'req-abc-123' })
       const client = makeClient()
-      await expect(client.get('/listings')).rejects.toMatchObject({
-        requestId: 'req-abc-123',
-      })
+      const err = await client.get('/listings').catch((e) => e)
+      expect(err).toBeInstanceOf(ValidationError)
+      expect(err.requestId).toBe('req-abc-123')
     })
 
     it('sets requestId to undefined when x-request-id header is absent', async () => {
-      mockFetch(400, { message: 'Bad request' })
+      mockFetch(404, { message: 'Not found' })
       const client = makeClient()
-      let caught: HttpError | undefined
-      try {
-        await client.get('/listings')
-      } catch (e) {
-        caught = e as HttpError
-      }
-      expect(caught?.requestId).toBeUndefined()
-    })
-
-    it('includes error body in HttpError.body', async () => {
-      const errorBody = { message: 'Unprocessable', errors: { name: ['is required'] } }
-      mockFetch(422, errorBody)
-      const client = makeClient()
-      let caught: HttpError | undefined
-      try {
-        await client.get('/listings')
-      } catch (e) {
-        caught = e as HttpError
-      }
-      expect(caught?.body).toEqual(errorBody)
+      const err = await client.get('/listings').catch((e) => e)
+      expect(err.requestId).toBeUndefined()
     })
 
     it('handles non-JSON error body gracefully', async () => {
@@ -411,10 +428,10 @@ describe('HttpClient', () => {
         }),
       )
       const client = makeClient()
-      await expect(client.get('/listings')).rejects.toMatchObject({
-        statusCode: 502,
-        message: 'HTTP 502',
-      })
+      const err = await client.get('/listings').catch((e) => e)
+      expect(err).toBeInstanceOf(ServerError)
+      expect(err.statusCode).toBe(502)
+      expect(err.message).toBe('HTTP 502')
     })
   })
 
@@ -575,7 +592,7 @@ describe('HttpClient', () => {
       expect(onUnauthorized).toHaveBeenCalledOnce()
     })
 
-    it('throws HttpError(401) immediately when no onUnauthorized is configured', async () => {
+    it('throws AuthenticationError immediately when no onUnauthorized is configured', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
         ok: false, status: 401,
         headers: new Headers(),
@@ -588,7 +605,9 @@ describe('HttpClient', () => {
         retryConfig: { maxAttempts: 1 },
       })
 
-      await expect(client.get('/test')).rejects.toMatchObject({ statusCode: 401 })
+      const err = await client.get('/test').catch((e) => e)
+      expect(err).toBeInstanceOf(AuthenticationError)
+      expect(err.statusCode).toBe(401)
     })
   })
 })

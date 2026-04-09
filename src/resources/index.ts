@@ -8,3 +8,5 @@ export { MessagesResource } from './messages'
 export { CalendarResource } from './calendar'
 
 export { ReviewsResource } from './reviews'
+
+export { InquiriesResource } from './inquiries'

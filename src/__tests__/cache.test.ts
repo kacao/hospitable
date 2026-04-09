@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { MemoryCache, cacheKey } from '../utils/cache'
 import { PropertiesResource } from '../resources/properties'
 import { ReservationsResource } from '../resources/reservations'

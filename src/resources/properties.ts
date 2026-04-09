@@ -11,6 +11,15 @@ export interface PropertyListParams {
   tags?: string[]
 }
 
+/**
+ * Resource for the Hospitable Properties API.
+ *
+ * Properties rarely change, so this resource's default cache TTL is 24h
+ * when caching is enabled. Cache is cleared automatically by the client
+ * on 401 re-auth.
+ *
+ * @see https://developer.hospitable.com/docs/public-api-docs/1i1kr1bhpg0ku-properties-resource
+ */
 export class PropertiesResource {
   private cache: MemoryCache<unknown> | null
 
@@ -28,6 +37,11 @@ export class PropertiesResource {
     return this.http.get<PropertyList>('/v2/properties', params as RequestOptions['params'])
   }
 
+  /**
+   * List properties, optionally filtered by tags.
+   *
+   * @see GET https://public.api.hospitable.com/v2/properties
+   */
   async list(params: PropertyListParams = {}): Promise<PropertyList> {
     const key = cacheKey('properties:list', params as Record<string, unknown>)
     if (this.cache) {
@@ -39,6 +53,12 @@ export class PropertiesResource {
     return result
   }
 
+  /**
+   * Fetch a single property by UUID.
+   *
+   * @see GET https://public.api.hospitable.com/v2/properties/{id}
+   * @throws {NotFoundError} on 404
+   */
   async get(id: string): Promise<Property> {
     const key = cacheKey('properties:get', { id })
     if (this.cache) {
@@ -50,6 +70,11 @@ export class PropertiesResource {
     return result
   }
 
+  /**
+   * List all tags attached to a given property.
+   *
+   * @see GET https://public.api.hospitable.com/v2/properties/{id}/tags
+   */
   async listTags(id: string): Promise<PropertyTag[]> {
     const key = cacheKey('properties:tags', { id })
     if (this.cache) {
@@ -61,10 +86,17 @@ export class PropertiesResource {
     return response.data
   }
 
+  /**
+   * Stream every property matching `params`, auto-paginating through all pages.
+   *
+   * Memory-efficient — pulls one page at a time. Pair with
+   * `collectAll(client.properties.iter())` to drain into an array.
+   */
   async *iter(params: Omit<PropertyListParams, 'page'> = {}): AsyncGenerator<Property> {
     yield* paginate<Property, PropertyListParams>(p => this.fetchList(p), params)
   }
 
+  /** Drop the in-memory cache. Called automatically by the client on 401 re-auth. */
   clearCache(): void {
     this.cache?.clear()
   }

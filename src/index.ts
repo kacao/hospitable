@@ -1,4 +1,4 @@
-export const VERSION = '0.3.2'
+export const VERSION = '0.4.0'
 
 export { HospitableClient } from './client'
 export type { HospitableClientConfig, ResourceCacheConfig } from './client'
@@ -11,7 +11,17 @@ export {
   ValidationError,
   ForbiddenError,
   ServerError,
+  ConfigurationError,
   createErrorFromResponse,
+} from './errors'
+
+// Aliases mandated by AGENTS.md — existing short names are retained for
+// backward compatibility; these let consumers catch by the spec names.
+export {
+  AuthenticationError as HospitableAuthError,
+  RateLimitError as HospitableRateLimitError,
+  ValidationError as HospitableValidationError,
+  ServerError as HospitableServerError,
 } from './errors'
 
 export * from './models/index'
@@ -33,7 +43,9 @@ export { CalendarResource } from './resources'
 
 export { ReviewsResource } from './resources'
 
+export { InquiriesResource } from './resources'
+
 export { sanitize, MemoryCache, cacheKey } from './utils'
 export type { CacheConfig } from './utils'
 
-export { ReservationFilter, PropertyFilter } from './filters'
+export { ReservationFilter, PropertyFilter, InquiryFilter } from './filters'

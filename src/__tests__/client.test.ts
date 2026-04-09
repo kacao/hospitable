@@ -4,6 +4,7 @@ import { PropertiesResource } from '../resources/properties'
 import { ReservationsResource } from '../resources/reservations'
 import { MessagesResource } from '../resources/messages'
 import { CalendarResource } from '../resources/calendar'
+import { InquiriesResource } from '../resources/inquiries'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -89,6 +90,15 @@ describe('HospitableClient', () => {
   it('exposes client.calendar (CalendarResource)', () => {
     const client = new HospitableClient({ token: 'pat' })
     expect(client.calendar).toBeInstanceOf(CalendarResource)
+  })
+
+  it('exposes client.inquiries (InquiriesResource) — regression guard for 0.4.0 ship-blocker', () => {
+    // Earlier in the 0.4.0 cycle, InquiriesResource was exported from the
+    // package but never wired into HospitableClient, making every call to
+    // `client.inquiries.list(...)` throw TypeError at runtime. This assertion
+    // is the canary that prevents that regression from reappearing.
+    const client = new HospitableClient({ token: 'pat' })
+    expect(client.inquiries).toBeInstanceOf(InquiriesResource)
   })
 
   it('a 401 from the API triggers token refresh and retries the request', async () => {

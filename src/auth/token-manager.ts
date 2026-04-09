@@ -30,7 +30,7 @@ export class TokenManager {
       this.refreshToken = config.refreshToken
       this.expiresAt = Date.now() + 60_000
     } else {
-      const envPat = process.env['HOSPITABLE_PAT']
+      const envPat = process.env['HOSPITABLE_API_PAT']
       if (envPat) {
         this.accessToken = envPat
         this.expiresAt = Infinity
@@ -91,8 +91,12 @@ export class TokenManager {
     })
 
     if (!response.ok) {
-      const text = await response.text()
-      throw new Error(`Token refresh failed (${response.status}): ${text}`)
+      // Drain the body to free the socket, but do NOT embed it in the
+      // thrown message: OAuth error responses can echo back credentials
+      // (client_secret in error_description) or PII. Callers who log
+      // errors would leak whatever the server returned.
+      await response.text().catch(() => '')
+      throw new Error(`Token refresh failed (${response.status})`)
     }
 
     const data = (await response.json()) as OAuthTokenResponse

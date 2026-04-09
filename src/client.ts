@@ -4,6 +4,7 @@ import { HttpClient } from './http/client'
 import type { RetryConfig } from './http/retry'
 import type { CacheConfig } from './utils/cache'
 import { CalendarResource } from './resources/calendar'
+import { InquiriesResource } from './resources/inquiries'
 import { MessagesResource } from './resources/messages'
 import { PropertiesResource } from './resources/properties'
 import { ReservationsResource } from './resources/reservations'
@@ -12,10 +13,11 @@ import { ReviewsResource } from './resources/reviews'
 export interface ResourceCacheConfig {
   properties?: CacheConfig
   reservations?: CacheConfig
+  inquiries?: CacheConfig
 }
 
 export interface HospitableClientConfig {
-  /** Personal Access Token. Also read from HOSPITABLE_PAT env var. */
+  /** Personal Access Token. Also read from HOSPITABLE_API_PAT env var. */
   token?: string
   /** OAuth2 refresh token */
   refreshToken?: string
@@ -39,6 +41,7 @@ export class HospitableClient {
   readonly calendar: CalendarResource
   readonly messages: MessagesResource
   readonly reviews: ReviewsResource
+  readonly inquiries: InquiriesResource
 
   constructor(config: HospitableClientConfig = {}) {
     const baseURL = config.baseURL ?? 'https://public.api.hospitable.com'
@@ -60,6 +63,7 @@ export class HospitableClient {
         await tokenManager.handleUnauthorized()
         this.properties.clearCache()
         this.reservations.clearCache()
+        this.inquiries.clearCache()
       },
       ...(config.debug !== undefined ? { debug: config.debug } : {}),
       ...(config.retry !== undefined ? { retryConfig: config.retry } : {}),
@@ -70,5 +74,6 @@ export class HospitableClient {
     this.calendar = new CalendarResource(httpClient)
     this.messages = new MessagesResource(httpClient)
     this.reviews = new ReviewsResource(httpClient)
+    this.inquiries = new InquiriesResource(httpClient, config.cache?.inquiries)
   }
 }

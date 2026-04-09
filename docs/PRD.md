@@ -2,7 +2,7 @@
 
 **Version:** 1.0.0
 **Status:** Implemented
-**Last Updated:** February 25, 2026
+**Last Updated:** 2026-04-09
 **Owner:** Engineering & Product Teams
 
 ---
@@ -36,7 +36,7 @@ Hospitable provides a world-class platform for Short-Term Rental (STR) managemen
 
 ### 4.1 Authentication
 
-- Personal Access Token (via config or `HOSPITABLE_PAT` env var)
+- Personal Access Token (via config or `HOSPITABLE_API_PAT` env var)
 - OAuth2 client credentials (machine-to-machine)
 - OAuth2 refresh token flow (long-lived sessions)
 - Automatic pre-call token refresh when expiry is imminent
@@ -49,14 +49,15 @@ Hospitable provides a world-class platform for Short-Term Rental (STR) managemen
 | **Properties** | list, get, iter, updateCalendar | P0 | ✅ Done |
 | **Reservations** | list, get, iter, getUpcoming | P0 | ✅ Done |
 | **Calendar** | get, update, block, unblock | P1 | ✅ Done |
-| **Messages** | list, send, listTemplates, sendTemplate | P1 | ✅ Done |
+| **Messages** | list, send, sendForInquiry, listTemplates, sendTemplate | P1 | ✅ Done |
 | **Reviews** | list, get, respond, iter | P2 | ✅ Done |
+| **Inquiries** | list, get, iter | P2 | ✅ Done |
 
 ### 4.3 Utilities
 
 - **Pagination:** `iter()` async generators on every resource — no cursor tracking required.
 - **Bulk collection:** `collectAll()` helper for small datasets.
-- **Filter builders:** Immutable fluent builders (`ReservationFilter`, `PropertyFilter`) for complex list queries.
+- **Filter builders:** Immutable fluent builders (`ReservationFilter`, `PropertyFilter`, `InquiryFilter`) for complex list queries.
 - **PII sanitization:** Recursive masking of sensitive fields (`email`, `phone`, tokens, etc.) in debug output.
 
 ---
@@ -107,7 +108,7 @@ Hospitable provides a world-class platform for Short-Term Rental (STR) managemen
 | Test coverage (statements) | > 95% | ✅ 100% |
 | Test coverage (branches) | > 95% | ✅ 97.77% |
 | Test coverage (functions) | > 95% | ✅ 100% |
-| Test count | — | ✅ 178 tests across 14 files |
+| Test count | — | ✅ 316 tests across 18 files |
 
 ---
 

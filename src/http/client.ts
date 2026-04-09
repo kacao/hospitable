@@ -2,6 +2,7 @@ import { VERSION } from '../index'
 import { withRetry, type RetryConfig } from './retry'
 import { sanitize } from '../utils/sanitize'
 import { camelToSnake, deepSnakeToCamel, deepCamelToSnake } from '../utils/case'
+import { createErrorFromResponse, type HospitableError } from '../errors'
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
@@ -20,9 +21,15 @@ export interface HttpClientConfig {
   retryConfig?: RetryConfig
 }
 
-// NOTE: We inline error creation here to avoid circular dep — the real errors
-// module will be implemented in a sibling PR. This file uses a simple inline
-// error class that matches the final interface so it can be swapped in later.
+/**
+ * Legacy HTTP error class.
+ *
+ * @deprecated Exported only for backward compatibility with code that
+ * imported `HttpError` directly. New code should catch
+ * {@link HospitableError} and its subclasses (`NotFoundError`,
+ * `AuthenticationError`, `ValidationError`, etc.) — `HttpClient` now throws
+ * those at runtime.
+ */
 export class HttpError extends Error {
   constructor(
     readonly statusCode: number,
@@ -50,6 +57,36 @@ function buildURL(base: string, path: string, params?: RequestOptions['params'])
     }
   }
   return url.toString()
+}
+
+async function readErrorBody(response: Response): Promise<Record<string, unknown>> {
+  try {
+    const raw = await response.json()
+    return deepSnakeToCamel(raw) as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
+function errorFromResponse(
+  response: Response,
+  body: Record<string, unknown>,
+): HospitableError {
+  const requestId = response.headers.get('x-request-id') ?? undefined
+  // RFC 6585 `Retry-After` — Hospitable (like most APIs) returns rate-limit
+  // backoff guidance via this header, not a JSON body field. Lift it here so
+  // `RateLimitError.retryAfter` reflects the server's actual wait request.
+  const retryAfterHeader = response.headers.get('Retry-After')
+  const retryAfterOverride =
+    retryAfterHeader !== null && /^\d+$/.test(retryAfterHeader)
+      ? parseInt(retryAfterHeader, 10)
+      : undefined
+  // Fall back to a status-derived message when the body omits one so the
+  // thrown error always carries something more useful than "undefined".
+  if (body['message'] === undefined) {
+    body = { ...body, message: `HTTP ${response.status}` }
+  }
+  return createErrorFromResponse(response.status, body, requestId, 1, retryAfterOverride)
 }
 
 export class HttpClient {
@@ -89,16 +126,8 @@ export class HttpClient {
           ...(body !== undefined ? { body: JSON.stringify(deepCamelToSnake(body)) } : {}),
         })
 
-        const requestId = response.headers.get('x-request-id') ?? undefined
-
         if (!response.ok) {
-          let errorBody: Record<string, unknown> = {}
-          try {
-            errorBody = (await response.json()) as Record<string, unknown>
-          } catch {
-            // ignore parse errors
-          }
-          const message = (errorBody['message'] as string | undefined) ?? `HTTP ${response.status}`
+          const errorBody = await readErrorBody(response)
           if (this.config.debug) {
             console.debug('[hospitable] error body:', sanitize(errorBody))
           }
@@ -113,12 +142,9 @@ export class HttpClient {
             if (retryResponse.ok) {
               return this.parseResponse<T>(retryResponse)
             }
-            let retryBody: Record<string, unknown> = {}
-            try { retryBody = (await retryResponse.json()) as Record<string, unknown> } catch { /* ignore */ }
-            const retryMessage = (retryBody['message'] as string | undefined) ?? `HTTP ${retryResponse.status}`
-            throw new HttpError(retryResponse.status, retryMessage, retryResponse.headers.get('x-request-id') ?? undefined, retryBody)
+            throw errorFromResponse(retryResponse, await readErrorBody(retryResponse))
           }
-          throw new HttpError(response.status, message, requestId, errorBody)
+          throw errorFromResponse(response, errorBody)
         }
 
         return this.parseResponse<T>(response)

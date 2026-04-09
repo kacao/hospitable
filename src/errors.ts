@@ -65,11 +65,28 @@ export class ServerError extends HospitableError {
   }
 }
 
+/**
+ * Thrown for client-side configuration / usage errors detected before any
+ * HTTP request is made — e.g. calling `InquiryFilter.toParams()` without
+ * supplying the required `properties` filter.
+ *
+ * Carries `statusCode = 0` to signal "no HTTP request happened". It still
+ * extends {@link HospitableError} so agents catching the base class handle
+ * it alongside runtime HTTP errors without special-casing.
+ */
+export class ConfigurationError extends HospitableError {
+  constructor(message: string) {
+    super(message, 0)
+    this.name = 'ConfigurationError'
+  }
+}
+
 export function createErrorFromResponse(
   statusCode: number,
   body: Record<string, unknown>,
   requestId?: string,
   attempts = 1,
+  retryAfterOverride?: number,
 ): HospitableError {
   const message = (body['message'] as string | undefined) ?? `HTTP ${statusCode}`
 
@@ -80,12 +97,19 @@ export function createErrorFromResponse(
       return new ForbiddenError(message, requestId)
     case 404:
       return new NotFoundError(message, requestId)
+    case 400:
     case 422: {
       const errors = (body['errors'] as Record<string, string[]> | undefined) ?? {}
       return new ValidationError(message, errors, requestId)
     }
     case 429: {
-      const retryAfter = (body['retryAfter'] as number | undefined) ?? 60
+      // Prefer the HTTP `Retry-After` header (RFC 6585, threaded in via
+      // retryAfterOverride) over any JSON body field — the Hospitable API
+      // returns this as a header, not a body key.
+      const retryAfter =
+        retryAfterOverride ??
+        (body['retryAfter'] as number | undefined) ??
+        60
       return new RateLimitError(retryAfter, requestId)
     }
     default:

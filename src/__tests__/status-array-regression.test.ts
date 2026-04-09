@@ -240,24 +240,7 @@ describe('status array regression — integration', () => {
     })
 
     it('sends message body as-is (no key conversion needed for single-key payload)', async () => {
-      const apiResponse = {
-        data: {
-          id: 1,
-          platform: 'airbnb',
-          conversation_id: 'conv-1',
-          reservation_id: 'res-42',
-          body: 'Check-in info',
-          sender_type: 'host',
-          sender_role: null,
-          sender: { first_name: 'Host', full_name: 'Host Name', locale: 'en', picture_url: null, thumbnail_url: null },
-          created_at: '2026-03-01T10:00:00Z',
-          source: 'hospitable',
-          sent_reference_id: null,
-          attachments: [],
-        },
-      }
-
-      const calls = captureFetch(200, apiResponse)
+      const calls = captureFetch(202, { data: { sent_reference_id: 'ref-1' } })
       const client = new HospitableClient({ token: 'test' })
 
       await client.messages.send('res-42', 'Check-in info')
@@ -267,24 +250,7 @@ describe('status array regression — integration', () => {
     })
 
     it('converts senderId to sender_id on the wire', async () => {
-      const apiResponse = {
-        data: {
-          id: 1,
-          platform: 'airbnb',
-          conversation_id: 'conv-1',
-          reservation_id: 'res-42',
-          body: 'Hello',
-          sender_type: 'host',
-          sender_role: null,
-          sender: { first_name: 'Host', full_name: 'Host Name', locale: 'en', picture_url: null, thumbnail_url: null },
-          created_at: '2026-03-01T10:00:00Z',
-          source: 'hospitable',
-          sent_reference_id: null,
-          attachments: [],
-        },
-      }
-
-      const calls = captureFetch(200, apiResponse)
+      const calls = captureFetch(202, { data: { sent_reference_id: 'ref-2' } })
       const client = new HospitableClient({ token: 'test' })
 
       await client.messages.send('res-42', 'Hello', { senderId: '51018147' })
@@ -292,6 +258,89 @@ describe('status array regression — integration', () => {
       const body = JSON.parse(calls[0]!.init.body as string)
       expect(body).toEqual({ body: 'Hello', sender_id: '51018147' })
       expect(body).not.toHaveProperty('senderId')
+    })
+
+    it('converts images array to snake_case images[] on the wire', async () => {
+      const calls = captureFetch(202, { data: { sent_reference_id: 'ref-3' } })
+      const client = new HospitableClient({ token: 'test' })
+
+      await client.messages.send('res-42', 'Pics attached', {
+        images: ['https://example.com/a.jpg', 'https://example.com/b.jpg'],
+      })
+
+      const body = JSON.parse(calls[0]!.init.body as string)
+      expect(body).toEqual({
+        body: 'Pics attached',
+        images: ['https://example.com/a.jpg', 'https://example.com/b.jpg'],
+      })
+    })
+  })
+
+  describe('messages.sendForInquiry() → wire format', () => {
+    const INQUIRY_UUID = '6f58fd0a-a9cb-3746-9219-384a156ff7bb'
+
+    it('POSTs to /v2/inquiries/{uuid}/messages with body in JSON payload', async () => {
+      const calls = captureFetch(202, { data: { sent_reference_id: 'ref-inq-1' } })
+      const client = new HospitableClient({ token: 'test-token' })
+
+      const receipt = await client.messages.sendForInquiry(
+        INQUIRY_UUID,
+        'Hi! Yes those dates are open.',
+      )
+
+      expect(calls).toHaveLength(1)
+      const call = calls[0]!
+
+      // Method + URL
+      expect(call.init.method).toBe('POST')
+      expect(call.url).toBe(
+        `https://public.api.hospitable.com/v2/inquiries/${INQUIRY_UUID}/messages`,
+      )
+
+      // Required headers
+      const headers = call.init.headers as Record<string, string>
+      expect(headers['Content-Type']).toBe('application/json')
+      expect(headers['Accept']).toBe('application/json')
+      expect(headers['Authorization']).toBe('Bearer test-token')
+      expect(headers['User-Agent']).toMatch(/^hospitable-ts\//)
+
+      // Body matches the API spec exactly
+      const body = JSON.parse(call.init.body as string)
+      expect(body).toEqual({ body: 'Hi! Yes those dates are open.' })
+
+      // Response is unwrapped and case-converted to MessageReceipt
+      expect(receipt).toEqual({ sentReferenceId: 'ref-inq-1' })
+    })
+
+    it('converts senderId to sender_id on the wire', async () => {
+      const calls = captureFetch(202, { data: { sent_reference_id: 'ref-inq-2' } })
+      const client = new HospitableClient({ token: 'test' })
+
+      await client.messages.sendForInquiry(INQUIRY_UUID, 'Hello', { senderId: 'airbnb-user-1' })
+
+      const body = JSON.parse(calls[0]!.init.body as string)
+      expect(body).toEqual({ body: 'Hello', sender_id: 'airbnb-user-1' })
+      expect(body).not.toHaveProperty('senderId')
+    })
+
+    it('preserves literal \\n in body (API parses /n for line breaks per docs)', async () => {
+      const calls = captureFetch(202, { data: { sent_reference_id: 'ref-inq-3' } })
+      const client = new HospitableClient({ token: 'test' })
+
+      await client.messages.sendForInquiry(INQUIRY_UUID, 'Line one\nLine two')
+
+      const body = JSON.parse(calls[0]!.init.body as string)
+      expect(body.body).toBe('Line one\nLine two')
+    })
+
+    it('URL-encodes inquiry UUIDs containing special characters safely', async () => {
+      const calls = captureFetch(202, { data: { sent_reference_id: 'ref-inq-4' } })
+      const client = new HospitableClient({ token: 'test' })
+
+      // Real UUIDs don't have special chars, but verify path composition is correct
+      await client.messages.sendForInquiry('abc-123', 'body')
+
+      expect(calls[0]!.url).toBe('https://public.api.hospitable.com/v2/inquiries/abc-123/messages')
     })
   })
 

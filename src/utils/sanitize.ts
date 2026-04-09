@@ -1,5 +1,5 @@
-const PII_FIELD_PATTERN = /^(email|phone|firstName|lastName|passportNumber|fullName|dateOfBirth|guestName|displayName|hostName|senderId)$/i
-const SENSITIVE_PATTERN = /token|secret|password|credential|apiKey|api_key/i
+const PII_FIELD_PATTERN = /^(email|phone|phoneNumbers|firstName|lastName|passportNumber|fullName|dateOfBirth|guestName|displayName|hostName|senderId)$/i
+const SENSITIVE_PATTERN = /token|secret|password|credential|apiKey|api_key|authorization/i
 
 /**
  * Recursively masks PII and sensitive fields in an object for safe logging.

@@ -1,212 +1,447 @@
 # hospitable
 
-[![npm version](https://badge.fury.io/js/hospitable.svg)](https://www.npmjs.com/package/hospitable)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+TypeScript SDK for the [Hospitable Public API](https://developer.hospitable.com/docs/public-api-docs/). Typed resources for properties, reservations, inquiries, calendars, messages, reviews. OAuth2 + PAT auth, auto-retry on 429/5xx, async-iterator pagination, PII masking.
 
-TypeScript SDK for the [Hospitable Public API](https://developer.hospitable.com/docs/public-api-docs/). Manage short-term rental properties, reservations, calendars, guest messaging, and reviews with full type safety.
+> **This README is written for AI coding agents.** It prioritizes exact type signatures, decision tables, and invariants over narrative. If a snippet disagrees with the source in `src/`, the source wins.
 
-## Features
-
-- **Full type safety** — 100% typed request/response models, zero `any`
-- **Auth** — Personal Access Token and OAuth2 (client credentials + refresh token)
-- **Auto-retry** — Jittered exponential backoff for 429 and 5xx errors
-- **Auto-refresh** — 401 responses silently trigger token refresh and request retry
-- **Pagination** — `iter()` async generators on every resource, no cursor tracking
-- **Security** — PII automatically masked in debug logs
-
-## Installation
+## Install
 
 ```bash
 npm install hospitable
 ```
 
-## Quick Start
+Requires Node ≥ 18. ESM and CJS both ship.
 
-### Personal Access Token
-
-1. Log in to [my.hospitable.com](https://my.hospitable.com)
-2. Go to **Apps → API access → Access tokens → + Add new**
-3. Copy your token
+## Initialize
 
 ```ts
 import { HospitableClient } from 'hospitable'
-
-const client = new HospitableClient({ token: 'your_pat_token' })
-
-// Or set HOSPITABLE_PAT env var and call with no args:
-// const client = new HospitableClient()
-
-const properties = await client.properties.list()
-console.log(`Found ${properties.data.length} properties`)
 ```
 
-### OAuth2
+| Scenario | Call |
+| --- | --- |
+| PAT in `HOSPITABLE_API_PAT` env var | `new HospitableClient()` |
+| PAT passed explicitly | `new HospitableClient({ token: 'hps_...' })` |
+| OAuth2 client credentials (m2m) | `new HospitableClient({ clientId, clientSecret })` |
+| OAuth2 access + refresh token | `new HospitableClient({ token, refreshToken, clientId, clientSecret })` |
+
+Env-var resolution: `token` is read from `HOSPITABLE_API_PAT` **only** when `token` is not set in config. No other env vars are consulted. No dotenv loading — the agent/host must populate `process.env`.
+
+### `HospitableClientConfig`
 
 ```ts
-// Client credentials (machine-to-machine)
-const client = new HospitableClient({
-  clientId: 'your_client_id',
-  clientSecret: 'your_client_secret',
-})
-
-// With refresh token (long-lived sessions)
-const client = new HospitableClient({
-  token: 'access_token',
-  refreshToken: 'refresh_token',
-  clientId: 'your_client_id',
-  clientSecret: 'your_client_secret',
-})
-// Token fetched and refreshed automatically; 401s trigger silent re-auth + retry
-```
-
-## Usage
-
-### Properties
-
-```ts
-// List all properties
-const { data } = await client.properties.list()
-
-// Get a single property
-const property = await client.properties.get('property-uuid')
-
-// Iterate all (auto-pagination)
-for await (const prop of client.properties.iter()) {
-  console.log(prop.name)
+interface HospitableClientConfig {
+  token?: string              // PAT or OAuth2 access token. Defaults to $HOSPITABLE_API_PAT.
+  refreshToken?: string       // OAuth2 refresh token.
+  clientId?: string           // OAuth2 client ID.
+  clientSecret?: string       // OAuth2 client secret.
+  baseURL?: string            // Default: 'https://public.api.hospitable.com'
+  retry?: RetryConfig         // See "Retry & rate limiting".
+  debug?: boolean             // Log requests with PII/auth masked. Default: false.
+  cache?: {
+    properties?:   CacheConfig  // Default: { enabled: false }
+    reservations?: CacheConfig
+    inquiries?:    CacheConfig
+  }
 }
 
-// Update calendar pricing
-await client.properties.updateCalendar('property-uuid', [
-  { date: '2026-06-01', price: { amount: 15000 }, available: true, minStay: 2 },
-])
+interface CacheConfig { enabled: boolean; ttl?: number; maxSize?: number }
 ```
 
-### Reservations
+## Method index
+
+Every callable surface. Use this as a jump table.
+
+| Call | Signature | HTTP |
+| --- | --- | --- |
+| `client.properties.list` | `(params?: PropertyListParams) => Promise<PropertyList>` | `GET /v2/properties` |
+| `client.properties.get` | `(id: string) => Promise<Property>` | `GET /v2/properties/{id}` |
+| `client.properties.listTags` | `(id: string) => Promise<PropertyTag[]>` | `GET /v2/properties/{id}/tags` |
+| `client.properties.iter` | `(params?: Omit<PropertyListParams,'page'>) => AsyncGenerator<Property>` | (paginates) |
+| `client.properties.clearCache` | `() => void` | — |
+| `client.reservations.list` | `(params?: ReservationListParams) => Promise<ReservationList>` | `GET /v2/reservations` |
+| `client.reservations.get` | `(id: string, include?: string) => Promise<Reservation>` | `GET /v2/reservations/{id}` |
+| `client.reservations.getUpcoming` | `(propertyIds: string[], options?: { include?: string }) => Promise<ReservationList>` | `GET /v2/reservations` (status=accepted, startDate=today) |
+| `client.reservations.iter` | `(params?: Omit<ReservationListParams,'page'>) => AsyncGenerator<Reservation>` | (paginates) |
+| `client.reservations.clearCache` | `() => void` | — |
+| `client.inquiries.list` | `(params: InquiryListParams) => Promise<InquiryList>` **(properties required)** | `GET /v2/inquiries` |
+| `client.inquiries.get` | `(uuid: string, include?: string) => Promise<Inquiry>` | `GET /v2/inquiries/{uuid}` |
+| `client.inquiries.iter` | `(params: Omit<InquiryListParams,'page'>) => AsyncGenerator<Inquiry>` | (paginates) |
+| `client.inquiries.clearCache` | `() => void` | — |
+| `client.messages.list` | `(conversationId: string) => Promise<MessageThread>` | `GET /v2/reservations/{id}/messages` |
+| `client.messages.send` | `(reservationId: string, body: string, options?: SendReservationMessageOptions) => Promise<MessageReceipt>` | `POST /v2/reservations/{id}/messages` |
+| `client.messages.sendForInquiry` | `(inquiryUuid: string, body: string, options?: SendMessageOptions) => Promise<MessageReceipt>` | `POST /v2/inquiries/{uuid}/messages` |
+| `client.messages.listTemplates` | `() => Promise<MessageTemplate[]>` | `GET /v2/message-templates` |
+| `client.messages.sendTemplate` | `(reservationId: string, templateId: string, variables?: Record<string,string>) => Promise<Message>` | `POST /v2/reservations/{id}/messages/template` |
+| `client.calendar.get` | `(propertyId: string, startDate: string, endDate: string) => Promise<CalendarData>` | `GET /v2/properties/{id}/calendar` |
+| `client.calendar.update` | `(propertyId: string, updates: CalendarUpdate[]) => Promise<void>` | `PUT /v2/properties/{id}/calendar` |
+| `client.calendar.block` | `(propertyId: string, startDate: string, endDate: string, reason?: string) => Promise<void>` | `POST /v2/properties/{id}/calendar/block` |
+| `client.calendar.unblock` | `(propertyId: string, startDate: string, endDate: string) => Promise<void>` | `POST /v2/properties/{id}/calendar/unblock` |
+| `client.reviews.list` | `(propertyId: string, params?: ReviewListParams) => Promise<ReviewList>` | `GET /v2/properties/{id}/reviews` |
+| `client.reviews.respond` | `(reviewId: string, responseText: string) => Promise<Review>` | `POST /v2/reviews/{id}/respond` |
+| `client.reviews.iter` | `(propertyId: string, params?: Omit<ReviewListParams,'page'>) => AsyncGenerator<Review>` | (paginates) |
+
+## Decision tables
+
+**Which send method?**
+
+| Conversation state | Call | Why |
+| --- | --- | --- |
+| `reservation.id` known (booking exists) | `client.messages.send(reservation.id, body, { images?, senderId? })` | Booking endpoint; accepts image attachments. |
+| `inquiry.id` known, no reservation yet (`reservation_id === null`) | `client.messages.sendForInquiry(inquiry.id, body, { senderId? })` | Pre-booking endpoint; **images not supported**. |
+| You only have a conversation ID | `inquiry.id === conversation_id` — use `sendForInquiry` if no reservation, `send` otherwise. | — |
+
+Calling the wrong endpoint → `410 Gone` or `422 Unprocessable`. TypeScript prevents passing `images` to `sendForInquiry` at compile time.
+
+**Which read method for a thread?**
+
+| Goal | Call |
+| --- | --- |
+| Get messages for a reservation or inquiry | `client.messages.list(reservationOrInquiryId)` — the resource is the reservation/conversation id |
+| Get the inquiry record with its messages embedded | `client.inquiries.get(uuid, 'messages')` — `messages` include only works on `get`, not `list` |
+
+## Params
+
+### `PropertyListParams`
 
 ```ts
-// Upcoming confirmed reservations
-const upcoming = await client.reservations.getUpcoming(['property-uuid'])
+interface PropertyListParams {
+  page?: number
+  perPage?: number
+  tags?: string[]
+}
+```
 
-// List with filters
-import { ReservationFilter } from 'hospitable'
+### `ReservationListParams`
 
-const filter = new ReservationFilter()
+```ts
+interface ReservationListParams {
+  properties?: string[]
+  startDate?: string             // ISO YYYY-MM-DD
+  endDate?: string               // ISO YYYY-MM-DD
+  status?: ReservationStatus | ReservationStatus[]
+  include?: string               // comma-separated: 'guest,properties,financials,...'
+  page?: number
+  perPage?: number
+}
+
+type ReservationStatus =
+  | 'not_accepted' | 'request' | 'accepted' | 'cancelled' | 'checkpoint'
+```
+
+`status` may be passed as a string or array; the SDK always serializes as an array.
+
+### `InquiryListParams`
+
+```ts
+interface InquiryListParams {
+  properties: string[]              // REQUIRED by the API
+  include?: string                  // comma-separated subset of InquiryIncludeField (minus 'messages')
+  lastMessageAt?: string            // ISO 8601 datetime
+  page?: number
+  perPage?: number
+}
+
+type InquiryIncludeField =
+  | 'financials' | 'guest' | 'properties' | 'listings' | 'messages'
+```
+
+Valid `include` values on **list**: `financials`, `guest`, `properties`, `listings`. The `messages` include is **only** supported on `client.inquiries.get`.
+
+### `ReviewListParams`
+
+```ts
+interface ReviewListParams {
+  responded?: boolean
+  include?: string
+  page?: number
+  perPage?: number
+}
+```
+
+## Filters
+
+Immutable fluent builders. Terminal call: `.toParams()`.
+
+| Filter | Chainable methods |
+| --- | --- |
+| `PropertyFilter` | `.tags(string[])`, `.perPage(n)` |
+| `ReservationFilter` | `.checkinAfter(date)`, `.checkinBefore(date)`, `.status(ReservationStatus \| ReservationStatus[])`, `.properties(ids)`, `.include(...fields)`, `.perPage(n)` |
+| `InquiryFilter` | `.properties(ids)` **required**, `.include(...InquiryIncludeField)`, `.lastMessageAfter(datetime)`, `.page(n)`, `.perPage(n)` |
+
+`InquiryFilter.toParams()` **throws at runtime** if `.properties()` was never called — the underlying endpoint rejects the request otherwise.
+
+```ts
+import { ReservationFilter, InquiryFilter } from 'hospitable'
+
+const params = new ReservationFilter()
   .checkinAfter('2026-01-01')
   .checkinBefore('2026-12-31')
-  .status('confirmed')
+  .status(['accepted', 'request'])
   .include('guest', 'properties')
   .perPage(50)
+  .toParams()
 
-const results = await client.reservations.list(filter.toParams())
+await client.reservations.list(params)
+```
 
-// Stream all (memory-efficient)
-for await (const reservation of client.reservations.iter({ startDate: '2026-01-01' })) {
-  console.log(reservation.id, reservation.status)
+## Canonical snippets
+
+### List all properties
+
+```ts
+for await (const p of client.properties.iter()) {
+  // p: Property — one at a time, memory-safe
 }
 ```
 
-### Messages
+### Upcoming reservations for specific listings
 
 ```ts
-// Send a message
-await client.messages.send('reservation-uuid', 'Looking forward to hosting you!')
-
-// List thread
-const thread = await client.messages.list('reservation-uuid')
-
-// List and send message templates
-const templates = await client.messages.listTemplates()
-await client.messages.sendTemplate('reservation-uuid', templates[0].id, { name: 'Alice' })
+const { data } = await client.reservations.getUpcoming(
+  ['prop-uuid-1', 'prop-uuid-2'],
+  { include: 'guest,properties' },
+)
 ```
 
-### Calendar
+`getUpcoming` is a thin wrapper — it calls `list` with `status='accepted'`, `startDate=today`, and the given `properties`.
+
+### Fetch an inquiry with its thread
 
 ```ts
-// Get availability for a date range
-const days = await client.calendar.get('property-uuid', '2026-07-01', '2026-07-31')
+const inquiry = await client.inquiries.get(uuid, 'guest,properties,messages')
+inquiry.property   // === inquiry.properties  (aliased by normalizeInquiry)
+inquiry.messages   // Message[] — requires include='messages'
+```
 
-// Update pricing / availability
-await client.calendar.update('property-uuid', [
+### Reply to a pre-booking inquiry
+
+```ts
+const receipt = await client.messages.sendForInquiry(
+  inquiry.id,
+  'Thanks for asking — those dates are available.',
+)
+// receipt.sentReferenceId : use to correlate with messages fetched later
+```
+
+### Reply to a booking with an image
+
+```ts
+await client.messages.send(reservation.id, 'Here is the gate code.', {
+  images: ['https://example.com/gate.jpg'],
+  senderId: 'cohost-user-id',   // omit to send as listing owner
+})
+```
+
+### Calendar block + price override
+
+```ts
+await client.calendar.block('prop-uuid', '2026-07-01', '2026-07-07', 'Owner stay')
+
+await client.calendar.update('prop-uuid', [
   { date: '2026-07-15', price: { amount: 20000 }, available: false },
+  { date: '2026-07-16', price: { amount: 22000 }, available: true, minStay: 3 },
 ])
-
-// Block dates (owner stays, maintenance, etc.)
-await client.calendar.block('property-uuid', '2026-07-01', '2026-07-07', 'Owner stay')
-
-// Unblock
-await client.calendar.unblock('property-uuid', '2026-07-01', '2026-07-07')
 ```
 
-### Reviews
+Dates are always ISO `YYYY-MM-DD`. `update` merges additively with existing calendar state.
+
+### Respond to unanswered reviews
 
 ```ts
-// List all reviews
-const { data } = await client.reviews.list()
-
-// Filter to unresponded only
-for await (const review of client.reviews.iter({ responded: false })) {
-  await client.reviews.respond(review.id, 'Thank you for your kind words!')
+for await (const review of client.reviews.iter('prop-uuid', { responded: false })) {
+  await client.reviews.respond(review.id, 'Thank you for your feedback!')
 }
 ```
 
-## Error Handling
+### Collect a small list into an array
+
+```ts
+import { collectAll } from 'hospitable'
+
+const all = await collectAll(
+  client.reservations.iter({ startDate: '2026-01-01' }),
+)
+```
+
+## Pagination
+
+Every list resource exposes `iter()` — async-generator auto-pagination. Pull one item at a time; the generator fetches new pages lazily.
+
+```ts
+for await (const r of client.reservations.iter({ startDate: '2026-01-01' })) {
+  // stop at any time — no further pages are fetched
+  if (r.status === 'accepted') break
+}
+```
+
+Helpers from the `paginate` / `collectAll` exports are also available if you need to drive pagination manually against a custom `PageFetcher`.
+
+## Async message delivery
+
+Both `send` and `sendForInquiry` return **202 Accepted** with a `MessageReceipt`:
+
+```ts
+interface MessageReceipt { sentReferenceId: string }
+```
+
+Delivery happens out-of-band on the upstream channel (Airbnb, VRBO, Booking.com, direct). To confirm a message actually landed:
+
+1. Persist `receipt.sentReferenceId` after the send.
+2. Poll `client.messages.list(conversationId)` later.
+3. Match against each `Message.sentReferenceId` — when it appears, delivery succeeded.
+
+Rate limits (both endpoints): **2/minute per target conversation**, **50 per 5 minutes globally**. 429s are retried automatically by the retry layer.
+
+## Errors
+
+Every failure mode is a typed subclass of `HospitableError`. Use `instanceof` for narrowing.
+
+| Class | `statusCode` | Extra fields |
+| --- | --- | --- |
+| `AuthenticationError` | `401` | — |
+| `ForbiddenError` | `403` | — |
+| `NotFoundError` | `404` | `resource?: string` |
+| `ValidationError` | `422` | `fields: Record<string, string[]>` |
+| `RateLimitError` | `429` | `retryAfter: number` (seconds) |
+| `ServerError` | `5xx` | `attempts: number` |
+| `HospitableError` | any | `statusCode: number`, `requestId?: string` (base class) |
+
+All subclasses inherit `statusCode` and `requestId`.
 
 ```ts
 import {
-  HospitableClient,
-  HospitableError,
-  RateLimitError,
-  AuthenticationError,
-  NotFoundError,
-  ForbiddenError,
-  ValidationError,
-  ServerError,
+  HospitableError, AuthenticationError, ForbiddenError,
+  NotFoundError, ValidationError, RateLimitError, ServerError,
 } from 'hospitable'
 
 try {
-  const property = await client.properties.get('uuid')
+  await client.properties.get(id)
 } catch (err) {
-  if (err instanceof RateLimitError) {
-    console.log(`Rate limited. Retry after ${err.retryAfter}s`)
-  } else if (err instanceof AuthenticationError) {
-    console.log('Check your token')
-  } else if (err instanceof NotFoundError) {
-    console.log('Property not found')
-  } else if (err instanceof ForbiddenError) {
-    console.log('Insufficient permissions')
-  } else if (err instanceof ValidationError) {
-    console.log('Invalid request:', err.message)
-  } else if (err instanceof ServerError) {
-    console.log(`Server error after ${err.attempts} attempt(s)`)
-  } else if (err instanceof HospitableError) {
-    console.log(`API error ${err.statusCode}: ${err.message}`)
-  }
+  if (err instanceof NotFoundError)       return null
+  if (err instanceof ValidationError)     console.error(err.fields)
+  if (err instanceof RateLimitError)      console.warn(`retry in ${err.retryAfter}s`)
+  if (err instanceof AuthenticationError) throw new Error('bad token')
+  if (err instanceof ForbiddenError)      throw new Error('insufficient permissions')
+  if (err instanceof ServerError)         throw new Error(`5xx after ${err.attempts} attempts`)
+  if (err instanceof HospitableError)     throw new Error(`${err.statusCode}: ${err.message}`)
+  throw err
 }
 ```
 
-## Rate Limiting & Retries
+Non-obvious: the SDK's retry layer **already handles** 429 and 5xx transparently. A `RateLimitError` reaching user code means retries were exhausted — do not wrap it in another retry loop.
 
-The SDK automatically retries `429` and `5xx` errors with jittered exponential backoff (up to 4 attempts, max 60s delay). `401` responses trigger a silent token refresh and single retry when OAuth is configured.
+## Retry & rate limiting
 
 ```ts
-const client = new HospitableClient({
-  token: 'your_token',
+interface RetryConfig {
+  maxAttempts?: number            // default 4 (includes initial attempt)
+  baseDelay?: number              // default 1000 ms
+  maxDelay?: number               // default 60_000 ms
+  onRateLimit?: (info: {
+    retryAfter: number
+    endpoint: string
+    attempt: number
+  }) => void
+}
+```
+
+Backoff is jittered exponential, capped at `maxDelay`. 401 triggers a silent OAuth refresh and a single retry when `refreshToken` + `clientId` + `clientSecret` are configured. On successful re-auth, all resource caches are cleared automatically.
+
+```ts
+new HospitableClient({
+  token,
   retry: {
     maxAttempts: 4,
     baseDelay: 1000,
     maxDelay: 60_000,
     onRateLimit: ({ retryAfter, endpoint, attempt }) => {
-      console.warn(`Rate limited on ${endpoint}, attempt ${attempt}, retrying in ${retryAfter}s`)
+      console.warn(`ratelimit ${endpoint} attempt=${attempt} retryAfter=${retryAfter}s`)
     },
   },
 })
 ```
 
-## Debug Logging
+## Caching
+
+Opt-in per-resource in-memory cache. Only `properties`, `reservations`, and `inquiries` are cacheable. Keys are derived from the full request params. The cache is cleared automatically when the client performs a 401 → refresh cycle.
 
 ```ts
-const client = new HospitableClient({ token: 'your_token', debug: true })
-// Logs every request URL and response body with PII fields masked
+new HospitableClient({
+  token,
+  cache: {
+    properties:   { enabled: true, ttl: 86_400_000 },  // 24 h — properties change rarely
+    reservations: { enabled: true, ttl: 60_000     },  //  1 m — reservations move
+    inquiries:    { enabled: true, ttl: 60_000     },  //  1 m
+  },
+})
+
+// manual invalidation
+client.properties.clearCache()
+client.reservations.clearCache()
+client.inquiries.clearCache()
+```
+
+Default TTLs if `enabled: true` but `ttl` is omitted: `properties` 24h, `reservations` 1m, `inquiries` 1m.
+
+## Debug logging
+
+```ts
+new HospitableClient({ token, debug: true })
+```
+
+Logs each request: method, URL, params, request/response bodies. `email`, `phone`, `token`, and `authorization` fields are masked before they hit the log stream.
+
+## Gotchas (read this)
+
+Things that routinely trip up agents generating code against this SDK.
+
+1. **`inquiry.id === conversation_id`.** Pass it directly to `client.messages.list(inquiry.id)`. Do not look for a separate `conversationId` field on inquiries.
+2. **Inquiry → reservation handoff.** While a conversation is still an inquiry (`reservation_id === null`), use `sendForInquiry`. Once a reservation exists, switch to `send`. Using the wrong endpoint returns 410 or 422.
+3. **Inquiry sends reject images.** `sendForInquiry`'s options type does not include `images` — pre-booking channels strip attachments. Attach images only on `send`.
+4. **`properties` is singular on an `Inquiry`.** The API returns a single `Property` under the plural-sounding `properties` field. The SDK's `normalizeInquiry` (applied automatically) additionally sets `inquiry.property` as an alias; both reference the same object. Prefer `inquiry.property` in new code.
+5. **`InquiryFilter.toParams()` throws** if `.properties()` was not called. The underlying endpoint requires it.
+6. **`messages` include is `get`-only.** On `client.inquiries.list`, `include=messages` is silently ignored (or rejected). Fetch per-inquiry with `get(uuid, 'messages')`, or call `client.messages.list(inquiry.id)` separately.
+7. **`send` / `sendForInquiry` return 202, not the message.** They return `MessageReceipt { sentReferenceId }`. Do not treat the return value as a persisted `Message`.
+8. **Do not wrap calls in your own retry loop** for 429/5xx — the SDK already does jittered exponential backoff. Re-wrapping causes double-retries and can trigger 50/5min hard caps.
+9. **Dates are ISO strings, not `Date` objects.** `YYYY-MM-DD` for calendar and reservation ranges; ISO 8601 with time/zone for `lastMessageAt`.
+10. **Only reservation message sends accept `senderId`** (co-host impersonation). Inquiry sends also accept `senderId`, but per the upstream API, it is only honored on Airbnb.
+
+## Exported types
+
+```ts
+// Client
+HospitableClient, HospitableClientConfig, ResourceCacheConfig
+
+// Models
+Property, PropertyList, PropertyListParams, PropertyTag,
+  PropertyAddress, PropertyCapacity, PropertyHouseRules
+Reservation, ReservationList, ReservationListParams,
+  ReservationStatus, ReservationPlatform, Guest, ReservationGuests
+Inquiry, InquiryList, InquiryListParams, InquiryIncludeField,
+  InquiryGuest, InquiryGuestCounts, InquiryListing, InquiryUser,
+  normalizeInquiry
+Message, MessageReceipt, MessageThread, MessageTemplate,
+  SendMessageOptions, SendReservationMessageOptions, MessageSender
+CalendarData, CalendarUpdate
+Review, ReviewList, ReviewListParams
+PaginatedResponse<T>
+
+// Filters
+ReservationFilter, PropertyFilter, InquiryFilter
+
+// Errors
+HospitableError, AuthenticationError, ForbiddenError, NotFoundError,
+  ValidationError, RateLimitError, ServerError, createErrorFromResponse
+
+// Auth
+TokenManager, TokenManagerConfig
+
+// Pagination
+paginate, collectAll, PageFetcher
+
+// Utils
+sanitize, MemoryCache, cacheKey, CacheConfig
 ```
 
 ## License

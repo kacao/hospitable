@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { withRetry } from '../http/retry'
-import { ServerError } from '../errors'
+import { RateLimitError, ServerError } from '../errors'
 
 class FakeHttpError extends Error {
   constructor(
@@ -188,7 +188,16 @@ describe('withRetry', () => {
     expect((err as ServerError).statusCode).toBe(503)
   })
 
-  it('uses retryAfter=0 path (jitter) when retryAfter is 0', async () => {
+  it('falls back to jittered delay (not zero) when retryAfter is 0', async () => {
+    // retryAfter = 0 is the "no specific backoff guidance" signal — the
+    // retry layer should fall through to exponential+jitter, not sleep zero.
+    const delays: number[] = []
+    const fakeSetTimeout = globalThis.setTimeout
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((cb: () => void, delay?: number) => {
+      delays.push(delay ?? 0)
+      return fakeSetTimeout(cb, 0)
+    }) as unknown as typeof globalThis.setTimeout)
+
     const fn = vi
       .fn()
       .mockRejectedValueOnce(new FakeHttpError(429, 'Rate limited', 0))
@@ -196,8 +205,50 @@ describe('withRetry', () => {
 
     const promise = withRetry(fn, '/test', { baseDelay: 100, maxDelay: 1000 })
     await vi.runAllTimersAsync()
-    const result = await promise
-    expect(result).toEqual({ ok: true })
+    await promise
+
+    // With baseDelay=100, attempt=1, exponential = 100, jitter ±25 → delay ∈ [75, 125]
+    expect(delays.length).toBeGreaterThan(0)
+    const retryDelay = delays[0]!
+    expect(retryDelay).toBeGreaterThanOrEqual(75)
+    expect(retryDelay).toBeLessThanOrEqual(125)
+  })
+
+  it('caps server-supplied retryAfter at maxDelay so a hostile upstream cannot stall the process', async () => {
+    // A server sending Retry-After: 86400 (1 day) must not cause the SDK to
+    // sleep for a day — the retry layer caps it at maxDelay (30s here).
+    const delays: number[] = []
+    const fakeSetTimeout = globalThis.setTimeout
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((cb: () => void, delay?: number) => {
+      delays.push(delay ?? 0)
+      return fakeSetTimeout(cb, 0)
+    }) as unknown as typeof globalThis.setTimeout)
+
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(new FakeHttpError(429, 'Rate limited', 86_400))
+      .mockResolvedValueOnce({ ok: true })
+
+    const promise = withRetry(fn, '/test', { baseDelay: 100, maxDelay: 30_000 })
+    await vi.runAllTimersAsync()
+    await promise
+
+    expect(delays.length).toBeGreaterThan(0)
+    expect(delays[0]!).toBeLessThanOrEqual(30_000)
+  })
+
+  it('preserves HospitableError subclass on exhausted retries (does not wrap RateLimitError as ServerError)', async () => {
+    const fn = vi.fn().mockRejectedValue(new RateLimitError(1))
+
+    const promise = withRetry(fn, '/test', { maxAttempts: 2, baseDelay: 10, maxDelay: 100 })
+    const caught = promise.catch((e: unknown) => e)
+    await vi.runAllTimersAsync()
+    const err = await caught
+
+    // The original type must survive — agents catch by `instanceof RateLimitError`
+    expect(err).toBeInstanceOf(RateLimitError)
+    expect(err).not.toBeInstanceOf(ServerError)
+    expect((err as RateLimitError).retryAfter).toBe(1)
   })
 
   it('onRateLimit fires on each 429 with incrementing attempt number', async () => {

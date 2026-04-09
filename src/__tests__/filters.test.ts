@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { ReservationFilter, PropertyFilter } from '../filters'
+import { ReservationFilter, PropertyFilter, InquiryFilter } from '../filters'
+import { ConfigurationError, HospitableError } from '../errors'
 
 describe('ReservationFilter', () => {
   it('is immutable — each method returns new instance, original unchanged', () => {
@@ -118,5 +119,55 @@ describe('ReservationFilter extra', () => {
   it('.perPage sets perPage', () => {
     const params = new ReservationFilter().perPage(25).toParams()
     expect(params).toEqual({ perPage: 25 })
+  })
+})
+
+describe('InquiryFilter', () => {
+  it('chains properties, include, lastMessageAfter, perPage into params', () => {
+    const params = new InquiryFilter()
+      .properties(['prop-1'])
+      .include('guest', 'properties')
+      .lastMessageAfter('2026-01-01T00:00:00Z')
+      .perPage(50)
+      .toParams()
+    expect(params).toEqual({
+      properties: ['prop-1'],
+      include: 'guest,properties',
+      lastMessageAt: '2026-01-01T00:00:00Z',
+      perPage: 50,
+    })
+  })
+
+  it('is immutable — each method returns new instance, original unchanged', () => {
+    const base = new InquiryFilter().properties(['prop-1'])
+    const next = base.include('guest')
+    expect(next).not.toBe(base)
+    expect(base.toParams().include).toBeUndefined()
+    expect(next.toParams().include).toBe('guest')
+  })
+
+  it('.page sets page for explicit pagination', () => {
+    const params = new InquiryFilter().properties(['prop-1']).page(3).toParams()
+    expect(params.page).toBe(3)
+  })
+
+  it('.properties() is immutable', () => {
+    const original = new InquiryFilter().properties(['a'])
+    const next = original.properties(['b'])
+    expect(original.toParams().properties).toEqual(['a'])
+    expect(next.toParams().properties).toEqual(['b'])
+  })
+
+  it('throws ConfigurationError when .toParams() is called without properties', () => {
+    expect(() => new InquiryFilter().toParams()).toThrowError(ConfigurationError)
+    expect(() => new InquiryFilter().toParams()).toThrowError(HospitableError)
+    expect(() => new InquiryFilter().toParams()).toThrowError(/properties.*required/i)
+  })
+
+  it('throws ConfigurationError when properties is set to an empty array', () => {
+    expect(() => new InquiryFilter().properties([]).toParams()).toThrowError(ConfigurationError)
+    expect(() => new InquiryFilter().properties([]).toParams()).toThrowError(
+      /properties.*required/i,
+    )
   })
 })

@@ -1,4 +1,4 @@
-import { ServerError } from '../errors'
+import { HospitableError, ServerError } from '../errors'
 
 export interface RetryConfig {
   maxAttempts?: number
@@ -51,7 +51,13 @@ export async function withRetry<T>(
       let delay: number
       if (statusCode === 429 && error instanceof Error) {
         const retryAfter = extractRetryAfter(error)
-        delay = retryAfter > 0 ? retryAfter * 1000 : jitteredDelay(baseDelay, attempt, maxDelay)
+        // Cap server-supplied retryAfter to maxDelay — a hostile or
+        // misconfigured upstream could otherwise stall the consumer's
+        // process for an unbounded duration.
+        delay =
+          retryAfter > 0
+            ? Math.min(retryAfter * 1000, maxDelay)
+            : jitteredDelay(baseDelay, attempt, maxDelay)
         onRateLimit?.({ retryAfter, endpoint, attempt })
       } else {
         delay = jitteredDelay(baseDelay, attempt, maxDelay)
@@ -61,6 +67,12 @@ export async function withRetry<T>(
     }
   }
 
+  // Preserve the original error type when it's already one of our typed
+  // errors — agents rely on `instanceof RateLimitError` etc., so wrapping
+  // an exhausted 429 in a generic ServerError would break narrowing.
+  if (lastError instanceof HospitableError) {
+    throw lastError
+  }
   const statusCode = getStatusCode(lastError) ?? 500
   const message = lastError instanceof Error ? lastError.message : `Request failed after ${maxAttempts} attempts`
   throw new ServerError(message, statusCode, maxAttempts)

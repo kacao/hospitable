@@ -64,6 +64,20 @@ describe('ReviewsResource', () => {
 
       expect(http.get).toHaveBeenCalledWith('/v2/properties/prop-1/reviews', { responded: false, include: 'guest' })
     })
+
+    it('throws NotFoundError when the property does not exist', async () => {
+      vi.mocked(http.get).mockRejectedValue(new NotFoundError('Property not found', 'req-1'))
+
+      await expect(resource.list('prop-missing')).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('propagates RateLimitError surfaced by the retry layer', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(35, 'req-rl'))
+
+      const err = await resource.list('prop-1').catch((e) => e)
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect((err as RateLimitError).retryAfter).toBe(35)
+    })
   })
 
   describe('respond()', () => {

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MessagesResource } from '../resources/messages'
 import type { HttpClient } from '../http/client'
-import type { Message, MessageTemplate } from '../models/message'
+import { HospitableError, NotFoundError, RateLimitError } from '../errors'
+import type { Message, MessageTemplate, MessageReceipt } from '../models/message'
 
 function makeMessage(overrides: Partial<Message> = {}): Message {
   return {
@@ -75,12 +76,29 @@ describe('MessagesResource', () => {
 
       expect(result).toEqual({ reservationId: 'res-42', messages: [] })
     })
+
+    it('throws NotFoundError when the reservation does not exist', async () => {
+      vi.mocked(http.get).mockRejectedValue(new NotFoundError('Reservation not found', 'req-1'))
+
+      await expect(resource.list('res-missing')).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('propagates RateLimitError surfaced by the retry layer', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(15, 'req-rl'))
+
+      const err = await resource.list('res-42').catch((e) => e)
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect((err as RateLimitError).retryAfter).toBe(15)
+    })
   })
 
   describe('send()', () => {
-    it('calls POST with { body } payload and unwraps .data', async () => {
-      const msg = makeMessage({ body: 'Check-in info' })
-      vi.mocked(http.post).mockResolvedValue({ data: msg })
+    const receipt: MessageReceipt = {
+      sentReferenceId: '2d637b98-2e20-470e-a582-83c4304d48a8',
+    }
+
+    it('calls POST /v2/reservations/{uuid}/messages with { body } payload', async () => {
+      vi.mocked(http.post).mockResolvedValue({ data: receipt })
 
       const result = await resource.send('res-42', 'Check-in info')
 
@@ -88,7 +106,110 @@ describe('MessagesResource', () => {
         '/v2/reservations/res-42/messages',
         { body: 'Check-in info' },
       )
-      expect(result).toEqual(msg)
+      expect(result).toBe(receipt)
+      expect(result.sentReferenceId).toBe('2d637b98-2e20-470e-a582-83c4304d48a8')
+    })
+
+    it('includes senderId in the payload when provided', async () => {
+      vi.mocked(http.post).mockResolvedValue({ data: receipt })
+
+      await resource.send('res-42', 'Hi', { senderId: 'cohost-1' })
+
+      expect(http.post).toHaveBeenCalledWith('/v2/reservations/res-42/messages', {
+        body: 'Hi',
+        senderId: 'cohost-1',
+      })
+    })
+
+    it('includes images in the payload when provided', async () => {
+      vi.mocked(http.post).mockResolvedValue({ data: receipt })
+
+      await resource.send('res-42', 'Here are the pics', {
+        images: ['https://example.com/a.jpg', 'https://example.com/b.jpg'],
+      })
+
+      expect(http.post).toHaveBeenCalledWith('/v2/reservations/res-42/messages', {
+        body: 'Here are the pics',
+        images: ['https://example.com/a.jpg', 'https://example.com/b.jpg'],
+      })
+    })
+
+    it('allows combining images and senderId', async () => {
+      vi.mocked(http.post).mockResolvedValue({ data: receipt })
+
+      await resource.send('res-42', 'body', {
+        senderId: 'cohost-1',
+        images: ['https://example.com/x.jpg'],
+      })
+
+      expect(http.post).toHaveBeenCalledWith('/v2/reservations/res-42/messages', {
+        body: 'body',
+        senderId: 'cohost-1',
+        images: ['https://example.com/x.jpg'],
+      })
+    })
+  })
+
+  describe('sendForInquiry()', () => {
+    const receipt: MessageReceipt = {
+      sentReferenceId: '2d637b98-2e20-470e-a582-83c4304d48a8',
+    }
+
+    it('calls POST /v2/inquiries/{uuid}/messages with { body } payload', async () => {
+      vi.mocked(http.post).mockResolvedValue({ data: receipt })
+
+      const result = await resource.sendForInquiry(
+        '6f58fd0a-a9cb-3746-9219-384a156ff7bb',
+        'Thanks for the question!',
+      )
+
+      expect(http.post).toHaveBeenCalledWith(
+        '/v2/inquiries/6f58fd0a-a9cb-3746-9219-384a156ff7bb/messages',
+        { body: 'Thanks for the question!' },
+      )
+      expect(result).toBe(receipt)
+      expect(result.sentReferenceId).toBe('2d637b98-2e20-470e-a582-83c4304d48a8')
+    })
+
+    it('includes senderId in the payload when provided', async () => {
+      vi.mocked(http.post).mockResolvedValue({ data: receipt })
+
+      await resource.sendForInquiry('inquiry-uuid', 'Hi there', { senderId: 'cohost-1' })
+
+      expect(http.post).toHaveBeenCalledWith('/v2/inquiries/inquiry-uuid/messages', {
+        body: 'Hi there',
+        senderId: 'cohost-1',
+      })
+    })
+
+    it('omits senderId from the payload when not provided', async () => {
+      vi.mocked(http.post).mockResolvedValue({ data: receipt })
+
+      await resource.sendForInquiry('inquiry-uuid', 'Hi there')
+
+      expect(http.post).toHaveBeenCalledWith('/v2/inquiries/inquiry-uuid/messages', {
+        body: 'Hi there',
+      })
+    })
+
+    it('propagates 410 Gone as a HospitableError when the inquiry has been deleted', async () => {
+      // 410 is mapped to ServerError by createErrorFromResponse (it's the
+      // default branch), so callers match via the base HospitableError class
+      // plus statusCode to distinguish inquiry-deleted from other errors.
+      vi.mocked(http.post).mockRejectedValue(new HospitableError('Gone', 410, 'req-gone'))
+
+      const err = await resource.sendForInquiry('deleted-inquiry', 'body').catch((e) => e)
+      expect(err).toBeInstanceOf(HospitableError)
+      expect(err.statusCode).toBe(410)
+    })
+
+    it('propagates RateLimitError surfaced by the retry layer', async () => {
+      vi.mocked(http.post).mockRejectedValue(new RateLimitError(60, 'req-rl'))
+
+      const err = await resource.sendForInquiry('inquiry-uuid', 'body').catch((e) => e)
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect(err.statusCode).toBe(429)
+      expect((err as RateLimitError).retryAfter).toBe(60)
     })
   })
 
@@ -101,6 +222,22 @@ describe('MessagesResource', () => {
 
       expect(http.get).toHaveBeenCalledWith('/v2/message-templates')
       expect(result).toEqual(templates)
+    })
+
+    it('propagates HospitableError from the HTTP layer', async () => {
+      vi.mocked(http.get).mockRejectedValue(new HospitableError('Forbidden', 403, 'req-1'))
+
+      const err = await resource.listTemplates().catch((e) => e)
+      expect(err).toBeInstanceOf(HospitableError)
+      expect(err.statusCode).toBe(403)
+    })
+
+    it('propagates RateLimitError surfaced by the retry layer', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(20, 'req-rl'))
+
+      const err = await resource.listTemplates().catch((e) => e)
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect((err as RateLimitError).retryAfter).toBe(20)
     })
   })
 
@@ -127,6 +264,22 @@ describe('MessagesResource', () => {
         '/v2/reservations/res-42/messages/template',
         { templateId: 'tpl-1', variables: { name: 'Alice', checkin: '2026-03-01' } },
       )
+    })
+
+    it('throws NotFoundError when the reservation or template does not exist', async () => {
+      vi.mocked(http.post).mockRejectedValue(new NotFoundError('Template not found', 'req-1'))
+
+      await expect(
+        resource.sendTemplate('res-42', 'tpl-missing'),
+      ).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('propagates RateLimitError surfaced by the retry layer', async () => {
+      vi.mocked(http.post).mockRejectedValue(new RateLimitError(90, 'req-rl'))
+
+      const err = await resource.sendTemplate('res-42', 'tpl-1').catch((e) => e)
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect((err as RateLimitError).retryAfter).toBe(90)
     })
   })
 })

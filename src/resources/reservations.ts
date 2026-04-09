@@ -21,6 +21,14 @@ function normalizeListParams(params: ReservationListParams) {
   }
 }
 
+/**
+ * Resource for the Hospitable Reservations API.
+ *
+ * Default cache TTL is 60 seconds when caching is enabled — reservations
+ * move too quickly for long-lived caching.
+ *
+ * @see https://developer.hospitable.com/docs/public-api-docs/a6ba5e23bc9cb-reservations-resource
+ */
 export class ReservationsResource {
   private cache: MemoryCache<unknown> | null
 
@@ -39,6 +47,12 @@ export class ReservationsResource {
     return this.http.get<ReservationList>('/v2/reservations', normalized as RequestOptions['params'])
   }
 
+  /**
+   * List reservations, filtered by the supplied params. See
+   * {@link ReservationFilter} for a fluent builder.
+   *
+   * @see GET https://public.api.hospitable.com/v2/reservations
+   */
   async list(params: ReservationListParams = {}): Promise<ReservationList> {
     const normalized = normalizeListParams(params)
     const key = cacheKey('reservations:list', normalized as unknown as Record<string, unknown>)
@@ -51,6 +65,12 @@ export class ReservationsResource {
     return result
   }
 
+  /**
+   * Fetch a single reservation by UUID.
+   *
+   * @see GET https://public.api.hospitable.com/v2/reservations/{id}
+   * @throws {NotFoundError} on 404
+   */
   async get(id: string, include?: string): Promise<Reservation> {
     const key = cacheKey('reservations:get', { id, include })
     if (this.cache) {
@@ -62,6 +82,14 @@ export class ReservationsResource {
     return result
   }
 
+  /**
+   * Convenience wrapper: accepted reservations on or after today, for the
+   * given properties. Equivalent to
+   * `list({ properties, startDate: today, status: 'accepted', include })`.
+   *
+   * Defaults `include` to `'guest,properties'` so agents get a useful
+   * payload without needing to remember the include-field list.
+   */
   async getUpcoming(
     propertyIds: string[],
     options: { include?: string } = {},
@@ -75,10 +103,17 @@ export class ReservationsResource {
     })
   }
 
+  /**
+   * Stream every reservation matching `params`, auto-paginating through all pages.
+   *
+   * Memory-efficient — pulls one page at a time. Pair with
+   * `collectAll(client.reservations.iter(...))` to drain into an array.
+   */
   async *iter(params: Omit<ReservationListParams, 'page'> = {}): AsyncGenerator<Reservation> {
     yield* paginate<Reservation, ReservationListParams>(p => this.fetchList(p), params)
   }
 
+  /** Drop the in-memory cache. Called automatically by the client on 401 re-auth. */
   clearCache(): void {
     this.cache?.clear()
   }
