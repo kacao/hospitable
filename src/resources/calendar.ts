@@ -25,7 +25,7 @@ export class CalendarResource {
     endDate: string,
   ): Promise<CalendarData> {
     const response = await this.http.get<{ data: CalendarData }>(
-      `/v2/properties/${propertyId}/calendar`,
+      `/v2/properties/${encodeURIComponent(propertyId)}/calendar`,
       { startDate, endDate },
     )
     return response.data
@@ -39,7 +39,10 @@ export class CalendarResource {
    * @see PUT https://public.api.hospitable.com/v2/properties/{id}/calendar
    */
   async update(propertyId: string, updates: CalendarUpdate[]): Promise<void> {
-    await this.http.put<void>(`/v2/properties/${propertyId}/calendar`, { data: updates })
+    await this.http.put<void>(
+      `/v2/properties/${encodeURIComponent(propertyId)}/calendar`,
+      { data: updates },
+    )
   }
 
   /**
@@ -55,7 +58,10 @@ export class CalendarResource {
   ): Promise<void> {
     const body: Record<string, string> = { startDate, endDate }
     if (reason !== undefined) body['reason'] = reason
-    await this.http.post<void>(`/v2/properties/${propertyId}/calendar/block`, body)
+    await this.http.post<void>(
+      `/v2/properties/${encodeURIComponent(propertyId)}/calendar/block`,
+      body,
+    )
   }
 
   /**
@@ -64,9 +70,12 @@ export class CalendarResource {
    * @see POST https://public.api.hospitable.com/v2/properties/{id}/calendar/unblock
    */
   async unblock(propertyId: string, startDate: string, endDate: string): Promise<void> {
-    await this.http.post<void>(`/v2/properties/${propertyId}/calendar/unblock`, {
-      startDate,
-      endDate,
-    })
+    await this.http.post<void>(
+      `/v2/properties/${encodeURIComponent(propertyId)}/calendar/unblock`,
+      {
+        startDate,
+        endDate,
+      },
+    )
   }
 }

@@ -2,60 +2,99 @@ import { describe, it, expect } from 'vitest'
 import { ReservationFilter, PropertyFilter, InquiryFilter } from '../filters'
 import { ConfigurationError, HospitableError } from '../errors'
 
+// Reservation filter now requires .properties() before .toParams() — helper
+// builds a filter already primed with properties so tests can focus on the
+// method under test without repeating setup.
+function base(): ReservationFilter {
+  return new ReservationFilter().properties(['prop-1'])
+}
+
 describe('ReservationFilter', () => {
+  it('throws ConfigurationError when .toParams() is called without properties', () => {
+    expect(() => new ReservationFilter().toParams()).toThrowError(ConfigurationError)
+    expect(() => new ReservationFilter().toParams()).toThrowError(HospitableError)
+    expect(() => new ReservationFilter().toParams()).toThrowError(/properties/i)
+  })
+
+  it('throws ConfigurationError when properties is set to an empty array', () => {
+    expect(() => new ReservationFilter().properties([]).toParams()).toThrowError(
+      ConfigurationError,
+    )
+  })
+
   it('is immutable — each method returns new instance, original unchanged', () => {
-    const original = new ReservationFilter()
+    const original = base()
     const next = original.checkinAfter('2026-01-01')
     expect(next).not.toBe(original)
-    expect(original.toParams()).toEqual({})
-    expect(next.toParams()).toEqual({ startDate: '2026-01-01' })
+    expect(original.toParams().startDate).toBeUndefined()
+    expect(next.toParams().startDate).toBe('2026-01-01')
   })
 
   it('.checkinAfter sets startDate', () => {
-    const params = new ReservationFilter().checkinAfter('2026-01-01').toParams()
-    expect(params).toEqual({ startDate: '2026-01-01' })
+    const params = base().checkinAfter('2026-01-01').toParams()
+    expect(params.startDate).toBe('2026-01-01')
   })
 
   it('.checkinBefore sets endDate', () => {
-    const params = new ReservationFilter().checkinBefore('2026-12-31').toParams()
-    expect(params).toEqual({ endDate: '2026-12-31' })
+    const params = base().checkinBefore('2026-12-31').toParams()
+    expect(params.endDate).toBe('2026-12-31')
+  })
+
+  it('.dateQuery sets dateQuery to checkin', () => {
+    const params = base().dateQuery('checkin').toParams()
+    expect(params.dateQuery).toBe('checkin')
+  })
+
+  it('.dateQuery sets dateQuery to checkout', () => {
+    const params = base().dateQuery('checkout').toParams()
+    expect(params.dateQuery).toBe('checkout')
+  })
+
+  it('.lastMessageAt sets lastMessageAt', () => {
+    const params = base().lastMessageAt('2026-01-15 14:30:00').toParams()
+    expect(params.lastMessageAt).toBe('2026-01-15 14:30:00')
   })
 
   it('.status sets single status string', () => {
-    const params = new ReservationFilter().status('confirmed').toParams()
-    expect(params).toEqual({ status: 'confirmed' })
+    const params = base().status('accepted').toParams()
+    expect(params.status).toBe('accepted')
   })
 
   it('.status sets array of statuses', () => {
-    const params = new ReservationFilter().status(['confirmed', 'pending']).toParams()
-    expect(params).toEqual({ status: ['confirmed', 'pending'] })
+    const params = base().status(['accepted', 'request']).toParams()
+    expect(params.status).toEqual(['accepted', 'request'])
   })
 
   it('.properties sets property ids', () => {
     const params = new ReservationFilter().properties(['a', 'b']).toParams()
-    expect(params).toEqual({ properties: ['a', 'b'] })
+    expect(params.properties).toEqual(['a', 'b'])
   })
 
   it('.include joins fields as comma-separated string', () => {
-    const params = new ReservationFilter().include('guest', 'properties').toParams()
-    expect(params).toEqual({ include: 'guest,properties' })
+    const params = base().include('guest', 'properties', 'review').toParams()
+    expect(params.include).toBe('guest,properties,review')
   })
 
   it('chaining sets all params', () => {
-    const params = new ReservationFilter()
+    const params = base()
       .checkinAfter('2026-01-01')
-      .status('confirmed')
+      .dateQuery('checkout')
+      .lastMessageAt('2026-01-15 00:00:00')
+      .status('accepted')
       .include('guest')
       .toParams()
     expect(params).toEqual({
+      properties: ['prop-1'],
       startDate: '2026-01-01',
-      status: 'confirmed',
+      dateQuery: 'checkout',
+      lastMessageAt: '2026-01-15 00:00:00',
+      status: 'accepted',
       include: 'guest',
     })
   })
 
   it('.checkinBefore() is immutable', () => {
-    const original = new ReservationFilter({ startDate: '2026-01-01' })
+    const original = base().checkinAfter('2026-01-01')
     const next = original.checkinBefore('2026-12-31')
     expect(next).not.toBe(original)
     expect(original.toParams().endDate).toBeUndefined()
@@ -63,7 +102,7 @@ describe('ReservationFilter', () => {
   })
 
   it('.include() is immutable', () => {
-    const original = new ReservationFilter()
+    const original = base()
     const next = original.include('guest')
     expect(next).not.toBe(original)
     expect(original.toParams().include).toBeUndefined()
@@ -71,7 +110,7 @@ describe('ReservationFilter', () => {
   })
 
   it('.perPage() is immutable', () => {
-    const original = new ReservationFilter()
+    const original = base()
     const next = original.perPage(50)
     expect(next).not.toBe(original)
     expect(original.toParams().perPage).toBeUndefined()
@@ -79,11 +118,19 @@ describe('ReservationFilter', () => {
   })
 
   it('.properties() is immutable', () => {
-    const original = new ReservationFilter()
+    const original = base()
     const next = original.properties(['a', 'b'])
     expect(next).not.toBe(original)
-    expect(original.toParams().properties).toBeUndefined()
+    expect(original.toParams().properties).toEqual(['prop-1'])
     expect(next.toParams().properties).toEqual(['a', 'b'])
+  })
+
+  it('.dateQuery() is immutable', () => {
+    const original = base().dateQuery('checkin')
+    const next = original.dateQuery('checkout')
+    expect(next).not.toBe(original)
+    expect(original.toParams().dateQuery).toBe('checkin')
+    expect(next.toParams().dateQuery).toBe('checkout')
   })
 })
 
@@ -117,8 +164,8 @@ describe('PropertyFilter', () => {
 
 describe('ReservationFilter extra', () => {
   it('.perPage sets perPage', () => {
-    const params = new ReservationFilter().perPage(25).toParams()
-    expect(params).toEqual({ perPage: 25 })
+    const params = base().perPage(25).toParams()
+    expect(params.perPage).toBe(25)
   })
 })
 
@@ -139,10 +186,10 @@ describe('InquiryFilter', () => {
   })
 
   it('is immutable — each method returns new instance, original unchanged', () => {
-    const base = new InquiryFilter().properties(['prop-1'])
-    const next = base.include('guest')
-    expect(next).not.toBe(base)
-    expect(base.toParams().include).toBeUndefined()
+    const baseF = new InquiryFilter().properties(['prop-1'])
+    const next = baseF.include('guest')
+    expect(next).not.toBe(baseF)
+    expect(baseF.toParams().include).toBeUndefined()
     expect(next.toParams().include).toBe('guest')
   })
 

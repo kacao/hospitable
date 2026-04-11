@@ -1,5 +1,11 @@
 import type { HttpClient, RequestOptions } from '../http/client'
-import type { Property, PropertyList, PropertyTag } from '../models/property'
+import type {
+  Property,
+  PropertyImage,
+  PropertyList,
+  PropertySearchParams,
+  PropertyTag,
+} from '../models/property'
 import { paginate } from '../http/paginate'
 import { MemoryCache, cacheKey, type CacheConfig } from '../utils/cache'
 
@@ -65,13 +71,15 @@ export class PropertiesResource {
       const cached = this.cache.get(key) as Property | undefined
       if (cached) return cached
     }
-    const result = await this.http.get<Property>(`/v2/properties/${id}`)
+    const result = await this.http.get<Property>(`/v2/properties/${encodeURIComponent(id)}`)
     this.cache?.set(key, result)
     return result
   }
 
   /**
-   * List all tags attached to a given property.
+   * List all tags attached to a given property. These are the structured
+   * org-level tags from the tag registry, distinct from the free-text
+   * `Property.tags` field inline on the property object.
    *
    * @see GET https://public.api.hospitable.com/v2/properties/{id}/tags
    */
@@ -81,9 +89,47 @@ export class PropertiesResource {
       const cached = this.cache.get(key) as PropertyTag[] | undefined
       if (cached) return cached
     }
-    const response = await this.http.get<{ data: PropertyTag[] }>(`/v2/properties/${id}/tags`)
+    const response = await this.http.get<{ data: PropertyTag[] }>(
+      `/v2/properties/${encodeURIComponent(id)}/tags`,
+    )
     this.cache?.set(key, response.data)
     return response.data
+  }
+
+  /**
+   * Fetch all images attached to a property, ordered by display position.
+   *
+   * @see GET https://public.api.hospitable.com/v2/properties/{id}/images
+   */
+  async getImages(id: string): Promise<PropertyImage[]> {
+    // Not cached: Hospitable returns pre-signed S3 URLs (typically ~1h
+    // expiry) and the properties-resource default TTL is 24h. Caching
+    // would serve expired URLs that return 403 Forbidden with no helpful
+    // error. Callers who need the array in-memory should hold the
+    // promise themselves.
+    const response = await this.http.get<{ data: PropertyImage[] }>(
+      `/v2/properties/${encodeURIComponent(id)}/images`,
+    )
+    return response.data
+  }
+
+  /**
+   * Search for available properties matching a window and party size.
+   *
+   * All three of `startDate`, `endDate`, and `adults` are **required** by
+   * the API — the SDK passes them through as-is and the server returns 400
+   * if any are missing.
+   *
+   * Unlike {@link list}, search results are availability-filtered — only
+   * properties that can host the given dates/guests appear.
+   *
+   * @see GET https://public.api.hospitable.com/v2/properties/search
+   */
+  async search(params: PropertySearchParams): Promise<PropertyList> {
+    return this.http.get<PropertyList>(
+      '/v2/properties/search',
+      params as unknown as RequestOptions['params'],
+    )
   }
 
   /**

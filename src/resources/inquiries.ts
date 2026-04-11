@@ -98,7 +98,7 @@ export class InquiriesResource {
       if (cached) return cached
     }
     const result = await this.http.get<Inquiry>(
-      `/v2/inquiries/${uuid}`,
+      `/v2/inquiries/${encodeURIComponent(uuid)}`,
       include ? { include } : undefined,
     )
     const normalized = normalizeInquiry(result)

@@ -198,6 +198,39 @@ describe('createErrorFromResponse', () => {
     expect(err.fields).toEqual({})
   })
 
+  it('sanitizes sensitive field names in ValidationError.fields', () => {
+    // Regression guard for the Sentry/winston leak path: a 422 echoing a
+    // rejected tax ID or email should not preserve the sensitive value on
+    // the thrown error.
+    const body = {
+      message: 'Unprocessable',
+      errors: {
+        taxId: ["The tax id '12-3456789' is invalid"],
+        email: ['Must be a valid email'],
+        name: ['Required'], // non-sensitive — should pass through
+      },
+    }
+    const err = createErrorFromResponse(422, body) as ValidationError
+    expect(err.fields['taxId']).toEqual('***')
+    expect(err.fields['email']).toEqual('***')
+    expect(err.fields['name']).toEqual(['Required'])
+  })
+
+  it('sanitizes business identity fields in 400 responses too', () => {
+    const body = {
+      message: 'Validation failed',
+      errors: {
+        bankAccount: ['Invalid routing number'],
+        vat: ['Invalid format'],
+        city: ['Too short'],
+      },
+    }
+    const err = createErrorFromResponse(400, body) as ValidationError
+    expect(err.fields['bankAccount']).toBe('***')
+    expect(err.fields['vat']).toBe('***')
+    expect(err.fields['city']).toEqual(['Too short'])
+  })
+
   it('maps 429 to RateLimitError with retryAfter', () => {
     const body = { message: 'Too many requests', retryAfter: 45 }
     const err = createErrorFromResponse(429, body) as RateLimitError

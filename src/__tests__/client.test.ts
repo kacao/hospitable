@@ -5,6 +5,9 @@ import { ReservationsResource } from '../resources/reservations'
 import { MessagesResource } from '../resources/messages'
 import { CalendarResource } from '../resources/calendar'
 import { InquiriesResource } from '../resources/inquiries'
+import { UserResource } from '../resources/user'
+import { TransactionsResource } from '../resources/transactions'
+import { PayoutsResource } from '../resources/payouts'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -99,6 +102,21 @@ describe('HospitableClient', () => {
     // is the canary that prevents that regression from reappearing.
     const client = new HospitableClient({ token: 'pat' })
     expect(client.inquiries).toBeInstanceOf(InquiriesResource)
+  })
+
+  it('exposes client.user (UserResource)', () => {
+    const client = new HospitableClient({ token: 'pat' })
+    expect(client.user).toBeInstanceOf(UserResource)
+  })
+
+  it('exposes client.transactions (TransactionsResource)', () => {
+    const client = new HospitableClient({ token: 'pat' })
+    expect(client.transactions).toBeInstanceOf(TransactionsResource)
+  })
+
+  it('exposes client.payouts (PayoutsResource)', () => {
+    const client = new HospitableClient({ token: 'pat' })
+    expect(client.payouts).toBeInstanceOf(PayoutsResource)
   })
 
   it('a 401 from the API triggers token refresh and retries the request', async () => {

@@ -1,8 +1,10 @@
 # hospitable
 
-TypeScript SDK for the [Hospitable Public API](https://developer.hospitable.com/docs/public-api-docs/). Typed resources for properties, reservations, inquiries, calendars, messages, reviews. OAuth2 + PAT auth, auto-retry on 429/5xx, async-iterator pagination, PII masking.
+TypeScript SDK for the [Hospitable Public API](https://developer.hospitable.com/docs/public-api-docs/). Typed resources for properties, reservations, inquiries, calendars, messages, reviews, user/billing, transactions, and payouts. OAuth2 + PAT auth, auto-retry on 429/5xx, async-iterator pagination, PII + business-identity masking.
 
 > **This README is written for AI coding agents.** It prioritizes exact type signatures, decision tables, and invariants over narrative. If a snippet disagrees with the source in `src/`, the source wins.
+>
+> **Design priorities** (agent-first): runtime errors with descriptive messages beat strict types alone, JSDoc discoverability beats minimal interfaces, semantic method names beat primitive composition, breaking changes are acceptable when they fix drift between types and API reality. See `decisions/0002-hospitable-sdk-schema-drift-and-agent-first-design.md` for the full rationale.
 
 ## Install
 
@@ -57,12 +59,15 @@ Every callable surface. Use this as a jump table.
 | `client.properties.list` | `(params?: PropertyListParams) => Promise<PropertyList>` | `GET /v2/properties` |
 | `client.properties.get` | `(id: string) => Promise<Property>` | `GET /v2/properties/{id}` |
 | `client.properties.listTags` | `(id: string) => Promise<PropertyTag[]>` | `GET /v2/properties/{id}/tags` |
+| `client.properties.getImages` | `(id: string) => Promise<PropertyImage[]>` | `GET /v2/properties/{id}/images` |
+| `client.properties.search` | `(params: PropertySearchParams) => Promise<PropertyList>` | `GET /v2/properties/search` |
 | `client.properties.iter` | `(params?: Omit<PropertyListParams,'page'>) => AsyncGenerator<Property>` | (paginates) |
 | `client.properties.clearCache` | `() => void` | — |
-| `client.reservations.list` | `(params?: ReservationListParams) => Promise<ReservationList>` | `GET /v2/reservations` |
+| `client.reservations.list` | `(params: ReservationListParams) => Promise<ReservationList>` **(properties required)** | `GET /v2/reservations` |
 | `client.reservations.get` | `(id: string, include?: string) => Promise<Reservation>` | `GET /v2/reservations/{id}` |
-| `client.reservations.getUpcoming` | `(propertyIds: string[], options?: { include?: string }) => Promise<ReservationList>` | `GET /v2/reservations` (status=accepted, startDate=today) |
-| `client.reservations.iter` | `(params?: Omit<ReservationListParams,'page'>) => AsyncGenerator<Reservation>` | (paginates) |
+| `client.reservations.getUpcoming` | `(propertyIds: string[], options?: { include?: string }) => Promise<ReservationList>` | `GET /v2/reservations` (status=accepted, startDate=today, dateQuery=checkin) |
+| `client.reservations.getInHouse` | `(propertyIds: string[], options?: { include?: string }) => Promise<Reservation[]>` | `GET /v2/reservations` (dateQuery=checkout, startDate=today) + client-side `arrivalDate<=today` filter |
+| `client.reservations.iter` | `(params: Omit<ReservationListParams,'page'>) => AsyncGenerator<Reservation>` **(properties required)** | (paginates) |
 | `client.reservations.clearCache` | `() => void` | — |
 | `client.inquiries.list` | `(params: InquiryListParams) => Promise<InquiryList>` **(properties required)** | `GET /v2/inquiries` |
 | `client.inquiries.get` | `(uuid: string, include?: string) => Promise<Inquiry>` | `GET /v2/inquiries/{uuid}` |
@@ -80,6 +85,11 @@ Every callable surface. Use this as a jump table.
 | `client.reviews.list` | `(propertyId: string, params?: ReviewListParams) => Promise<ReviewList>` | `GET /v2/properties/{id}/reviews` |
 | `client.reviews.respond` | `(reviewId: string, responseText: string) => Promise<Review>` | `POST /v2/reviews/{id}/respond` |
 | `client.reviews.iter` | `(propertyId: string, params?: Omit<ReviewListParams,'page'>) => AsyncGenerator<Review>` | (paginates) |
+| `client.user.get` | `() => Promise<User>` | `GET /v2/user` |
+| `client.transactions.list` | `(params?: TransactionListParams) => Promise<TransactionList>` | `GET /v2/transactions` *(financials:read scope)* |
+| `client.transactions.iter` | `(params?: Omit<TransactionListParams,'page'>) => AsyncGenerator<Transaction>` | (paginates) |
+| `client.payouts.list` | `(params?: PayoutListParams) => Promise<PayoutList>` | `GET /v2/payouts` *(financials:read scope)* |
+| `client.payouts.iter` | `(params?: Omit<PayoutListParams,'page'>) => AsyncGenerator<Payout>` | (paginates) |
 
 ## Decision tables
 
@@ -100,6 +110,26 @@ Calling the wrong endpoint → `410 Gone` or `422 Unprocessable`. TypeScript pre
 | Get messages for a reservation or inquiry | `client.messages.list(reservationOrInquiryId)` — the resource is the reservation/conversation id |
 | Get the inquiry record with its messages embedded | `client.inquiries.get(uuid, 'messages')` — `messages` include only works on `get`, not `list` |
 
+**Which reservation date filter?**
+
+| Goal | Call |
+| --- | --- |
+| Guests arriving in a window | `list({ properties, startDate, endDate, dateQuery: 'checkin' })` *(default — can omit)* |
+| Guests departing in a window | `list({ properties, startDate, endDate, dateQuery: 'checkout' })` |
+| Upcoming reservations (from today forward) | `getUpcoming(propertyIds)` — wrapper: status='accepted', startDate=today, dateQuery='checkin' |
+| **Guests currently in-house** (arrived + not yet departed) | `getInHouse(propertyIds)` — two-filter strategy |
+| Any reservation by exact ID | `get(id, include?)` |
+
+`dateQuery` only accepts `'checkin'` or `'checkout'`. Anything else → `400`.
+
+**Why does `getInHouse()` exist as a dedicated helper?** The Hospitable
+API only accepts a single `date_query` per request, so "arrived AND not
+yet departed" can't be expressed in one query. `getInHouse()` fetches
+everyone whose checkout is today-or-later (via `dateQuery='checkout'`,
+`startDate=today`), then filters locally for `arrivalDate<=today`. Returns
+a plain `Reservation[]` (not a paginated wrapper) because the client-side
+filter would make pagination metadata misleading.
+
 ## Params
 
 ### `PropertyListParams`
@@ -112,24 +142,78 @@ interface PropertyListParams {
 }
 ```
 
+### `PropertySearchParams`
+
+Availability search — distinct from `list` in that only properties that can
+host the given window and party size appear.
+
+```ts
+interface PropertySearchParams {
+  startDate: string   // ISO YYYY-MM-DD — REQUIRED
+  endDate: string     // ISO YYYY-MM-DD — REQUIRED
+  adults: number      // REQUIRED
+  children?: number
+  infants?: number
+  pets?: number
+  page?: number
+  perPage?: number
+}
+```
+
+All three of `startDate`, `endDate`, and `adults` are required by the API.
+Missing any returns `400`.
+
 ### `ReservationListParams`
 
 ```ts
 interface ReservationListParams {
-  properties?: string[]
-  startDate?: string             // ISO YYYY-MM-DD
-  endDate?: string               // ISO YYYY-MM-DD
+  properties: string[]                            // REQUIRED by the API
+  startDate?: string                              // ISO YYYY-MM-DD
+  endDate?: string                                // ISO YYYY-MM-DD
+  dateQuery?: 'checkin' | 'checkout'              // default: 'checkin' server-side
+  lastMessageAt?: string                          // 'YYYY-MM-DD HH:MM:SS' (not ISO 8601!)
   status?: ReservationStatus | ReservationStatus[]
-  include?: string               // comma-separated: 'guest,properties,financials,...'
+  include?: string                                // comma-separated — see ReservationIncludeField
   page?: number
   perPage?: number
 }
 
 type ReservationStatus =
   | 'not_accepted' | 'request' | 'accepted' | 'cancelled' | 'checkpoint'
+
+type ReservationDateQuery = 'checkin' | 'checkout'
+
+type ReservationIncludeField =
+  | 'guest' | 'user' | 'financials' | 'listings' | 'properties' | 'review'
 ```
 
-`status` may be passed as a string or array; the SDK always serializes as an array.
+- **`properties` is required.** The SDK throws `ConfigurationError` locally before the HTTP call if it's missing or an empty array — see [Gotchas](#gotchas-read-this).
+- **`dateQuery`** picks which date field `startDate`/`endDate` filter against. Defaults to `'checkin'` server-side. Use `'checkout'` for "guests still in-house" or "departing in this window" queries. Only `'checkin'` and `'checkout'` are valid — anything else returns `400`.
+- **`lastMessageAt` format quirk**: the API expects `YYYY-MM-DD HH:MM:SS` (space-separated, no timezone), **not ISO 8601**.
+- **`include=review`** fetches the review associated with each reservation alongside the reservation itself — useful for batch review-status audits.
+- `status` may be passed as a string or array; the SDK always serializes as an array.
+
+### `TransactionListParams` / `PayoutListParams`
+
+```ts
+interface TransactionListParams {
+  startDate?: string    // ISO YYYY-MM-DD
+  endDate?: string      // ISO YYYY-MM-DD
+  properties?: string[]
+  page?: number
+  perPage?: number
+}
+
+interface PayoutListParams {
+  startDate?: string    // ISO YYYY-MM-DD
+  endDate?: string      // ISO YYYY-MM-DD
+  properties?: string[]
+  page?: number
+  perPage?: number
+}
+```
+
+⚠️ **Always pass bounds for agent workflows.** Both endpoints accept no-param calls, which stream the account's entire financial history — see [Gotchas](#gotchas-read-this).
 
 ### `InquiryListParams`
 
@@ -153,9 +237,215 @@ Valid `include` values on **list**: `financials`, `guest`, `properties`, `listin
 ```ts
 interface ReviewListParams {
   responded?: boolean
-  include?: string
+  include?: string          // 'guest' | 'reservation' | 'guest,reservation'
   page?: number
   perPage?: number
+}
+
+type ReviewIncludeField = 'guest' | 'reservation'
+```
+
+Pass `include: 'guest,reservation'` to side-load the minimal guest info
+(first/last name, language) and reservation summary (id, code, checkIn,
+checkOut) onto each review — saves a second API call per review.
+
+Unknown `include` values are silently ignored by the API — don't rely
+on error feedback for typos.
+
+## Shapes
+
+### `Reservation`
+
+The reservation object exposes status in **three** fields to cover the
+API's evolution. See the [Gotchas](#gotchas-read-this) section for the
+spelling trap.
+
+```ts
+interface Reservation {
+  id: string
+  code: string
+  platform: ReservationPlatform
+  platformId: string
+  bookingDate: string
+  arrivalDate: string        // ISO — may include timezone offset
+  departureDate: string
+  checkIn: string
+  checkOut: string
+  nights: number
+  stayType: string
+  ownerStay: boolean | null
+
+  // Status — prefer `reservationStatus` in new code
+  reservationStatus: {
+    current: { category: ReservationStatus; subCategory: string | null }
+    history: Array<{
+      category: ReservationStatus
+      subCategory: string | null
+      changedAt: string
+    }>
+  }
+  /** @deprecated use reservationStatus.current.category */
+  status: ReservationStatus
+  /** @deprecated use reservationStatus.history. SDK normalizes
+   *  american 'canceled' → british 'cancelled' on every response. */
+  statusHistory: Array<{
+    category: string
+    status: string         // normalized to british spelling by the SDK
+    changedAt: string
+  }>
+
+  guests: ReservationGuests
+  guest?: Guest              // only when include=guest
+  user?: ReservationUser     // only when include=user
+  financials?: unknown       // only when include=financials
+  properties?: unknown[]     // only when include=properties
+  listings?: unknown[]       // only when include=listings
+  review?: unknown | null    // only when include=review
+
+  notes: string | null
+  conversationId: string
+  conversationLanguage: string | null
+  lastMessageAt: string | null
+  issueAlert: unknown
+}
+```
+
+### `Review`
+
+Reviews are split into public (what the guest posted on the platform)
+and private (host-only feedback not shown to other guests).
+
+```ts
+interface Review {
+  id: string
+  platform: string
+  public: {
+    rating: number                    // integer 1-5
+    ratingPlatformOriginal: string    // platform's native format, e.g. "5.00"
+    review: string                    // guest's public review text
+    response: string | null           // host's public response, if any
+  }
+  private: {
+    feedback: string | null           // host-only private note
+    detailedRatings: Array<{
+      type: 'value' | 'cleanliness' | 'communication' | 'location'
+          | 'checkin' | 'accuracy' | 'facilities' | 'staff' | 'services'
+          | (string & {})
+      rating: number                  // 0-5; 0 means category not collected
+      comment: string | null
+    }>
+  }
+  reviewedAt: string                  // ISO — when guest submitted
+  respondedAt: string | null          // ISO — when host responded
+  canRespond: boolean                 // false after platform response window closes
+
+  guest?: {                           // only when include=guest
+    firstName: string
+    lastName: string
+    language: string
+  }
+  reservation?: {                     // only when include=reservation
+    id: string
+    code: string
+    checkIn: string
+    checkOut: string
+  }
+}
+```
+
+### `Message`
+
+```ts
+interface Message {
+  id: number | string
+  platform: string
+  platformId: string                  // upstream platform's message id
+  conversationId: string
+  reservationId: string
+  contentType: 'text/plain' | (string & {})
+  body: string
+  attachments: Array<{                // typed — NOT opaque
+    type: 'image' | (string & {})
+    url: string                       // ⚠️ pre-signed S3, ~1h expiry. DO NOT CACHE.
+  }>
+  reactions: unknown[]                // never observed populated
+  senderType: 'host' | 'guest' | (string & {})
+  senderRole: string | null
+  sender: {
+    firstName: string
+    fullName: string
+    locale: string
+    pictureUrl: string | null
+    thumbnailUrl: string | null
+    location: string                  // e.g. 'Kippa-Ring, Australia'; empty for hosts
+  }
+  createdAt: string
+  source: 'hospitable' | 'platform' | 'automated' | 'AI' | 'public_api' | (string & {})
+  integration: unknown | null
+  sentReferenceId: string | null      // match against MessageReceipt.sentReferenceId
+}
+```
+
+**Observability trick**: `source === 'public_api'` tags every message the
+SDK itself sent. Filter on it to see your own agent's sends vs. everyone
+else's:
+
+```ts
+const thread = await client.messages.list(reservationId)
+const mySends = thread.messages.filter(m => m.source === 'public_api')
+```
+
+### `User`
+
+```ts
+interface User {
+  id: string
+  email: string
+  name: string
+  profilePicture: string | null
+  business: boolean
+  company: string | null
+  vat: string | null
+  taxId: string | null
+  streetLine1: string | null
+  streetLine2: string | null
+  postalCode: string | null
+  city: string | null
+  state: string | null
+  country: string | null
+}
+```
+
+### `Transaction` / `Payout`
+
+```ts
+interface Money {
+  amount: number        // minor currency units (cents for USD)
+  formatted: string     // pre-formatted, e.g. "$191.48"
+  currency: string      // ISO 4217
+}
+
+interface Transaction {
+  id: string
+  platform: string
+  type: string          // 'Payout' | 'Rent' | 'Refund' | 'Adjustment' | ...
+  details: string | null
+  reference: string | null
+  currency: string
+  amount: number | null           // null when paidOutAmount is used instead
+  paidOutAmount: Money | null
+  date: string                    // ISO 8601
+  startDate: string | null
+}
+
+interface Payout {
+  id: string
+  platform: string
+  platformId: string              // platform's payout id (e.g. Airbnb's "G-...")
+  bankAccount: string             // display, e.g. "Checking ••4169 (USD)"
+  reference: string | null
+  amount: Money
+  date: string                    // ISO 8601
 }
 ```
 
@@ -166,19 +456,21 @@ Immutable fluent builders. Terminal call: `.toParams()`.
 | Filter | Chainable methods |
 | --- | --- |
 | `PropertyFilter` | `.tags(string[])`, `.perPage(n)` |
-| `ReservationFilter` | `.checkinAfter(date)`, `.checkinBefore(date)`, `.status(ReservationStatus \| ReservationStatus[])`, `.properties(ids)`, `.include(...fields)`, `.perPage(n)` |
+| `ReservationFilter` | `.properties(ids)` **required**, `.checkinAfter(date)`, `.checkinBefore(date)`, `.dateQuery('checkin'\|'checkout')`, `.lastMessageAt('YYYY-MM-DD HH:MM:SS')`, `.status(ReservationStatus \| ReservationStatus[])`, `.include(...ReservationIncludeField)`, `.perPage(n)` |
 | `InquiryFilter` | `.properties(ids)` **required**, `.include(...InquiryIncludeField)`, `.lastMessageAfter(datetime)`, `.page(n)`, `.perPage(n)` |
 
-`InquiryFilter.toParams()` **throws at runtime** if `.properties()` was never called — the underlying endpoint rejects the request otherwise.
+Both `ReservationFilter.toParams()` and `InquiryFilter.toParams()` **throw `ConfigurationError` at runtime** if `.properties()` was never called — the underlying endpoints reject the request otherwise.
 
 ```ts
 import { ReservationFilter, InquiryFilter } from 'hospitable'
 
 const params = new ReservationFilter()
+  .properties([propertyId])            // required — throws without it
   .checkinAfter('2026-01-01')
   .checkinBefore('2026-12-31')
+  .dateQuery('checkout')               // optional — default 'checkin'
   .status(['accepted', 'request'])
-  .include('guest', 'properties')
+  .include('guest', 'properties', 'review')
   .perPage(50)
   .toParams()
 
@@ -204,7 +496,41 @@ const { data } = await client.reservations.getUpcoming(
 )
 ```
 
-`getUpcoming` is a thin wrapper — it calls `list` with `status='accepted'`, `startDate=today`, and the given `properties`.
+`getUpcoming` is a thin wrapper — it calls `list` with `status='accepted'`, `startDate=today`, `dateQuery='checkin'`, and the given `properties`.
+
+### Guests currently in-house
+
+```ts
+const inHouse = await client.reservations.getInHouse(
+  ['prop-uuid-1', 'prop-uuid-2'],
+  { include: 'guest,properties' },
+)
+// inHouse: Reservation[] — NOT a paginated wrapper, because this method
+// applies a client-side arrivalDate filter that would break pagination
+// metadata.
+for (const r of inHouse) {
+  console.log(`${r.guest?.firstName} ${r.guest?.lastName} — checks out ${r.departureDate.slice(0,10)}`)
+}
+```
+
+### Check a property's availability
+
+```ts
+const { data } = await client.properties.search({
+  startDate: '2026-07-01',
+  endDate:   '2026-07-07',
+  adults:    2,
+  children:  1,
+})
+// Only properties that can host those dates + party size appear.
+```
+
+### Fetch property photos
+
+```ts
+const images = await client.properties.getImages('prop-uuid')
+// images[i].url is pre-signed S3 with ~1h expiry. Do not cache it.
+```
 
 ### Fetch an inquiry with its thread
 
@@ -260,8 +586,58 @@ for await (const review of client.reviews.iter('prop-uuid', { responded: false }
 import { collectAll } from 'hospitable'
 
 const all = await collectAll(
-  client.reservations.iter({ startDate: '2026-01-01' }),
+  client.reservations.iter({
+    properties: propertyIds,                // required
+    startDate: '2026-01-01',
+  }),
 )
+```
+
+### Who am I?
+
+```ts
+const me = await client.user.get()
+console.log(`${me.name} (${me.email})`)
+if (me.business) {
+  console.log(`Business: ${me.company}, Tax ID: ${me.taxId}`)
+}
+```
+
+### Financial reporting — always pass bounds
+
+```ts
+// A reporting window — scope transactions and payouts with date ranges
+// so you never accidentally stream the entire account history.
+const start = '2026-01-01'
+const end   = '2026-03-31'
+
+const transactions = await collectAll(
+  client.transactions.iter({ startDate: start, endDate: end }),
+)
+const payouts = await collectAll(
+  client.payouts.iter({ startDate: start, endDate: end }),
+)
+
+const totalPaidOut = payouts.reduce((sum, p) => sum + p.amount.amount, 0)
+console.log(`Paid out Q1: $${(totalPaidOut / 100).toFixed(2)}`)
+```
+
+⚠️ **Do not** call `collectAll(client.payouts.iter())` with no params — it
+will stream the account's entire history. See
+[Gotchas](#gotchas-read-this).
+
+### Review with guest + reservation included
+
+```ts
+for await (const review of client.reviews.iter('prop-uuid', {
+  include: 'guest,reservation',
+})) {
+  const name = review.guest ? `${review.guest.firstName} ${review.guest.lastName}` : 'Anonymous'
+  console.log(`${name}: ${review.public.rating}/5 "${review.public.review}"`)
+  if (review.private.feedback) {
+    console.log(`  (private feedback: ${review.private.feedback})`)
+  }
+}
 ```
 
 ## Pagination
@@ -299,6 +675,7 @@ Every failure mode is a typed subclass of `HospitableError`. Use `instanceof` fo
 
 | Class | `statusCode` | Extra fields |
 | --- | --- | --- |
+| `ConfigurationError` | `0` (no HTTP made) | — |
 | `AuthenticationError` | `401` | — |
 | `ForbiddenError` | `403` | — |
 | `NotFoundError` | `404` | `resource?: string` |
@@ -307,17 +684,19 @@ Every failure mode is a typed subclass of `HospitableError`. Use `instanceof` fo
 | `ServerError` | `5xx` | `attempts: number` |
 | `HospitableError` | any | `statusCode: number`, `requestId?: string` (base class) |
 
-All subclasses inherit `statusCode` and `requestId`.
+All subclasses inherit `statusCode` and `requestId`. `ConfigurationError` is thrown **before** any network request is made — used when required params are missing locally (e.g. `reservations.list({})` without `properties`). `statusCode: 0` distinguishes it from HTTP errors in catch blocks.
 
 ```ts
 import {
-  HospitableError, AuthenticationError, ForbiddenError,
+  HospitableError, ConfigurationError,
+  AuthenticationError, ForbiddenError,
   NotFoundError, ValidationError, RateLimitError, ServerError,
 } from 'hospitable'
 
 try {
-  await client.properties.get(id)
+  await client.reservations.list({ properties: [propertyId] })
 } catch (err) {
+  if (err instanceof ConfigurationError)  return console.error(`Bad call: ${err.message}`)
   if (err instanceof NotFoundError)       return null
   if (err instanceof ValidationError)     console.error(err.fields)
   if (err instanceof RateLimitError)      console.warn(`retry in ${err.retryAfter}s`)
@@ -329,7 +708,10 @@ try {
 }
 ```
 
-Non-obvious: the SDK's retry layer **already handles** 429 and 5xx transparently. A `RateLimitError` reaching user code means retries were exhausted — do not wrap it in another retry loop.
+Non-obvious:
+
+- **The SDK's retry layer already handles 429 and 5xx transparently.** A `RateLimitError` reaching user code means retries were exhausted — do not wrap it in another retry loop.
+- **`ValidationError.fields` is automatically sanitized.** Sensitive keys (`email`, `firstName`, `taxId`, `bankAccount`, etc.) are replaced with `'***'` before the error is thrown. A caught error shipped to Sentry/winston won't leak PII or business identity. See [Debug logging](#debug-logging) for the full field list.
 
 ## Retry & rate limiting
 
@@ -366,6 +748,13 @@ new HospitableClient({
 
 Opt-in per-resource in-memory cache. Only `properties`, `reservations`, and `inquiries` are cacheable. Keys are derived from the full request params. The cache is cleared automatically when the client performs a 401 → refresh cycle.
 
+**Deliberately NOT cached:**
+
+- `properties.getImages()` — returns pre-signed S3 URLs with ~1h expiry. A 24h cache would serve URLs that return 403 Forbidden.
+- `user.get()` — business profile changes rarely but not never; no cache to avoid stale identity on account edits.
+- `transactions` / `payouts` — financial data should always reflect the latest state; caching could mask just-posted rows.
+- `messages` — conversation state is dynamic; stale message threads are worse than useless.
+
 ```ts
 new HospitableClient({
   token,
@@ -390,22 +779,44 @@ Default TTLs if `enabled: true` but `ttl` is omitted: `properties` 24h, `reserva
 new HospitableClient({ token, debug: true })
 ```
 
-Logs each request: method, URL, params, request/response bodies. `email`, `phone`, `token`, and `authorization` fields are masked before they hit the log stream.
+Logs each request: method, URL, params, request/response bodies. Sanitization runs recursively over any object before it hits the log stream or a caught `ValidationError.fields`. Three categories are masked:
+
+- **Guest PII**: `email`, `phone`, `phoneNumbers`, `firstName`, `lastName`, `fullName`, `dateOfBirth`, `guestName`, `displayName`, `hostName`, `passportNumber`, `senderId`
+- **Credentials**: anything matching `token`, `secret`, `password`, `credential`, `apiKey`, `api_key`, `authorization`
+- **Business identity** (financial + address fine-grained): `taxId`/`tax_id`, `vat`, `bankAccount`/`bank_account`, `streetLine1`/`street_line1`, `streetLine2`/`street_line2`, `postalCode`/`postal_code`
+
+Deliberately **not** masked (too broad to be individually identifying, and masking would cripple debugging):
+
+- `city`, `state`, `country`, `company`
+- `amount`, `paidOutAmount` (sensitive financial but not identity)
+- `platformId` — overloaded: on messages/reservations it's the public platform ID; on payouts it's a bank-transfer reference. Field-name-based redaction can't distinguish the two.
 
 ## Gotchas (read this)
 
 Things that routinely trip up agents generating code against this SDK.
 
-1. **`inquiry.id === conversation_id`.** Pass it directly to `client.messages.list(inquiry.id)`. Do not look for a separate `conversationId` field on inquiries.
-2. **Inquiry → reservation handoff.** While a conversation is still an inquiry (`reservation_id === null`), use `sendForInquiry`. Once a reservation exists, switch to `send`. Using the wrong endpoint returns 410 or 422.
-3. **Inquiry sends reject images.** `sendForInquiry`'s options type does not include `images` — pre-booking channels strip attachments. Attach images only on `send`.
-4. **`properties` is singular on an `Inquiry`.** The API returns a single `Property` under the plural-sounding `properties` field. The SDK's `normalizeInquiry` (applied automatically) additionally sets `inquiry.property` as an alias; both reference the same object. Prefer `inquiry.property` in new code.
-5. **`InquiryFilter.toParams()` throws** if `.properties()` was not called. The underlying endpoint requires it.
-6. **`messages` include is `get`-only.** On `client.inquiries.list`, `include=messages` is silently ignored (or rejected). Fetch per-inquiry with `get(uuid, 'messages')`, or call `client.messages.list(inquiry.id)` separately.
-7. **`send` / `sendForInquiry` return 202, not the message.** They return `MessageReceipt { sentReferenceId }`. Do not treat the return value as a persisted `Message`.
-8. **Do not wrap calls in your own retry loop** for 429/5xx — the SDK already does jittered exponential backoff. Re-wrapping causes double-retries and can trigger 50/5min hard caps.
-9. **Dates are ISO strings, not `Date` objects.** `YYYY-MM-DD` for calendar and reservation ranges; ISO 8601 with time/zone for `lastMessageAt`.
-10. **Only reservation message sends accept `senderId`** (co-host impersonation). Inquiry sends also accept `senderId`, but per the upstream API, it is only honored on Airbnb.
+1. **`reservations.list` requires `properties`.** Calling with an empty or missing array throws `ConfigurationError` locally before any HTTP request is made. The error message names the field and gives an example. Same goes for `iter()` and the fluent `ReservationFilter.toParams()`.
+2. **Status spelling trap** — the legacy `statusHistory[].status` field uses American `canceled` in the raw API response, while `status` and `reservationStatus.current.category` use British `cancelled`. **The SDK normalizes on read**: `normalizeReservation()` rewrites `canceled` → `cancelled` on every response passing through `list()`/`get()`/`iter()`, so `r.statusHistory.some(h => h.status === 'cancelled')` works correctly through the SDK. But if you receive a `Reservation` from a **webhook payload** or a **cached pre-normalization** source, the raw value may still be `'canceled'`. Prefer `reservationStatus.history` in new code — it's consistent all the way down.
+3. **`dateQuery` only accepts `'checkin'` or `'checkout'`.** Anything else returns `400`. Default is `'checkin'`. Use `'checkout'` for "still-in-house" or "departing in window" queries. Only one `date_query` per request — see `getInHouse()` for the two-sided case.
+4. **`lastMessageAt` format is NOT ISO 8601.** The API expects `'YYYY-MM-DD HH:MM:SS'` (space-separated, no timezone). Passing ISO 8601 returns `400`.
+5. **`getInHouse()` timezone caveat.** "Today" is computed from the SDK host's **UTC** clock, not per-property local time. For properties in strongly-offset timezones (e.g. Hawaii at UTC-10), calling during the ~0:00–10:00 UTC window can misclassify a same-day turnover by one day. If you need millisecond-correct boundary behavior, query `list()` directly with a timezone-aware `today`.
+6. **`getImages()` returns pre-signed S3 URLs with ~1h expiry.** The SDK does **not** cache this method for that reason. Do not persist the URL — re-fetch when you need the content.
+7. **Message attachments are also pre-signed S3 URLs with short expiry.** Same advice: don't cache. Re-fetch the message thread when you need the content.
+8. **`transactions` and `payouts` are UNBOUNDED by default.** Calling `.iter()` with no params streams the entire account history (hundreds to thousands of rows). **Always pass `startDate`/`endDate` or `properties`** — especially in agent-driven code paths, where a prompt-injected agent could exfil full financial history in one turn.
+9. **`user.get()` unwraps a `.data` envelope; other resource `.get()` methods don't.** This is an API-side inconsistency (Hospitable wraps `/v2/user` but not `/v2/properties/{id}`), not an SDK bug. The SDK handles the unwrap so callers get a bare `User`.
+10. **`source: 'public_api'` tags messages sent through this SDK.** Useful for audit: `thread.messages.filter(m => m.source === 'public_api')` returns your own agent's sends.
+11. **`inquiry.id === conversation_id`.** Pass it directly to `client.messages.list(inquiry.id)`. Do not look for a separate `conversationId` field on inquiries.
+12. **Inquiry → reservation handoff.** While a conversation is still an inquiry (`reservation_id === null`), use `sendForInquiry`. Once a reservation exists, switch to `send`. Using the wrong endpoint returns 410 or 422.
+13. **Inquiry sends reject images.** `sendForInquiry`'s options type does not include `images` — pre-booking channels strip attachments. Attach images only on `send`.
+14. **`properties` is singular on an `Inquiry`.** The API returns a single `Property` under the plural-sounding `properties` field. The SDK's `normalizeInquiry` (applied automatically) additionally sets `inquiry.property` as an alias; both reference the same object. Prefer `inquiry.property` in new code.
+15. **`InquiryFilter.toParams()` throws** if `.properties()` was not called. The underlying endpoint requires it.
+16. **`messages` include is `get`-only.** On `client.inquiries.list`, `include=messages` is silently ignored (or rejected). Fetch per-inquiry with `get(uuid, 'messages')`, or call `client.messages.list(inquiry.id)` separately.
+17. **`send` / `sendForInquiry` return 202, not the message.** They return `MessageReceipt { sentReferenceId }`. Do not treat the return value as a persisted `Message`.
+18. **Do not wrap calls in your own retry loop** for 429/5xx — the SDK already does jittered exponential backoff. Re-wrapping causes double-retries and can trigger 50/5min hard caps.
+19. **Dates are ISO strings, not `Date` objects.** `YYYY-MM-DD` for calendar and reservation ranges; ISO 8601 with time/zone for inquiry `lastMessageAt`; `'YYYY-MM-DD HH:MM:SS'` for reservation `lastMessageAt` (yes, different formats on different endpoints — this is the API's doing, not the SDK's).
+20. **Only reservation message sends accept `senderId`** (co-host impersonation). Inquiry sends also accept `senderId`, but per the upstream API, it is only honored on Airbnb.
+21. **Unknown `include` values are silently ignored by the API.** Don't rely on error feedback for typos — pass only the literals in `ReservationIncludeField` / `ReviewIncludeField` / `InquiryIncludeField`. A misspelled include returns an empty-but-successful response.
+22. **URL IDs are auto-encoded.** Every `${id}` interpolation goes through `encodeURIComponent()` before hitting the wire — path-traversal attempts via `'../../admin'` resolve to an encoded no-op, not a different endpoint. You can pass untrusted-ish IDs without extra sanitization.
 
 ## Exported types
 
@@ -413,32 +824,75 @@ Things that routinely trip up agents generating code against this SDK.
 // Client
 HospitableClient, HospitableClientConfig, ResourceCacheConfig
 
-// Models
-Property, PropertyList, PropertyListParams, PropertyTag,
-  PropertyAddress, PropertyCapacity, PropertyHouseRules
+// Resources (classes — mostly used via client.<resource>)
+PropertiesResource, PropertyListParams
+ReservationsResource
+MessagesResource
+CalendarResource
+ReviewsResource
+InquiriesResource
+UserResource
+TransactionsResource
+PayoutsResource
+
+// Property models
+Property, PropertyList, PropertyTag, PropertyImage, PropertySearchParams,
+  PropertyAddress, PropertyCapacity, PropertyHouseRules,
+  PropertyRoomDetail, PropertyRoomBed, PropertyParentChild
+
+// Reservation models
 Reservation, ReservationList, ReservationListParams,
-  ReservationStatus, ReservationPlatform, Guest, ReservationGuests
+  ReservationStatus, RESERVATION_STATUSES, isReservationStatus,
+  ReservationPlatform, ReservationDateQuery, ReservationIncludeField,
+  ReservationStatusObject, ReservationStatusHistoryEntry,
+  ReservationLegacyStatusHistoryEntry, ReservationUser,
+  Guest, ReservationGuests, normalizeReservation
+
+// Inquiry models
 Inquiry, InquiryList, InquiryListParams, InquiryIncludeField,
   InquiryGuest, InquiryGuestCounts, InquiryListing, InquiryUser,
   normalizeInquiry
+
+// Message models
 Message, MessageReceipt, MessageThread, MessageTemplate,
-  SendMessageOptions, SendReservationMessageOptions, MessageSender
-CalendarData, CalendarUpdate
-Review, ReviewList, ReviewListParams
-PaginatedResponse<T>
+  MessageSender, MessageAttachment, MessageReaction,
+  MessageSource, MessageSenderType, MessageContentType,
+  SendMessageOptions, SendReservationMessageOptions
+
+// Review models
+Review, ReviewList, ReviewListParams, ReviewIncludeField,
+  ReviewPublic, ReviewPrivate, ReviewDetailedRating,
+  ReviewDetailedRatingType, ReviewGuest, ReviewReservation,
+  ReviewRespondBody
+
+// Calendar models
+CalendarData, CalendarDay, CalendarDayPrice, CalendarDayStatus,
+  CalendarUpdate
+
+// User / billing models
+User
+
+// Financial models
+Money, Transaction, TransactionList, TransactionListParams,
+  Payout, PayoutList, PayoutListParams
+
+// Pagination
+PaginatedResponse<T>, paginate, collectAll, PageFetcher
 
 // Filters
 ReservationFilter, PropertyFilter, InquiryFilter
 
 // Errors
-HospitableError, AuthenticationError, ForbiddenError, NotFoundError,
-  ValidationError, RateLimitError, ServerError, createErrorFromResponse
+HospitableError, ConfigurationError,
+  AuthenticationError, ForbiddenError, NotFoundError,
+  ValidationError, RateLimitError, ServerError,
+  createErrorFromResponse
+// Aliases (per AGENTS.md)
+HospitableAuthError, HospitableRateLimitError,
+  HospitableValidationError, HospitableServerError
 
 // Auth
 TokenManager, TokenManagerConfig
-
-// Pagination
-paginate, collectAll, PageFetcher
 
 // Utils
 sanitize, MemoryCache, cacheKey, CacheConfig

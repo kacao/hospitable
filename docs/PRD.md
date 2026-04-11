@@ -2,7 +2,7 @@
 
 **Version:** 1.0.0
 **Status:** Implemented
-**Last Updated:** 2026-04-09
+**Last Updated:** 2026-04-11
 **Owner:** Engineering & Product Teams
 
 ---
@@ -46,19 +46,26 @@ Hospitable provides a world-class platform for Short-Term Rental (STR) managemen
 
 | Resource | Operations | Priority | Status |
 | :--- | :--- | :--- | :--- |
-| **Properties** | list, get, iter, updateCalendar | P0 | ✅ Done |
-| **Reservations** | list, get, iter, getUpcoming | P0 | ✅ Done |
+| **Properties** | list, get, listTags, getImages, search, iter | P0 | ✅ Done |
+| **Reservations** | list, get, getUpcoming, getInHouse, iter | P0 | ✅ Done |
 | **Calendar** | get, update, block, unblock | P1 | ✅ Done |
 | **Messages** | list, send, sendForInquiry, listTemplates, sendTemplate | P1 | ✅ Done |
-| **Reviews** | list, get, respond, iter | P2 | ✅ Done |
+| **Reviews** | list, respond, iter | P2 | ✅ Done |
 | **Inquiries** | list, get, iter | P2 | ✅ Done |
+| **User / Billing** | get | P2 | ✅ Done |
+| **Transactions** | list, iter *(financials:read scope)* | P2 | ✅ Done |
+| **Payouts** | list, iter *(financials:read scope)* | P2 | ✅ Done |
 
 ### 4.3 Utilities
 
 - **Pagination:** `iter()` async generators on every resource — no cursor tracking required.
 - **Bulk collection:** `collectAll()` helper for small datasets.
-- **Filter builders:** Immutable fluent builders (`ReservationFilter`, `PropertyFilter`, `InquiryFilter`) for complex list queries.
-- **PII sanitization:** Recursive masking of sensitive fields (`email`, `phone`, tokens, etc.) in debug output.
+- **Filter builders:** Immutable fluent builders (`ReservationFilter`, `PropertyFilter`, `InquiryFilter`) for complex list queries. `ReservationFilter.toParams()` and `InquiryFilter.toParams()` throw `ConfigurationError` if `.properties()` was not called.
+- **Convenience helpers with semantic names:** `reservations.getUpcoming()` (accepted reservations arriving ≥ today) and `reservations.getInHouse()` (guests currently checked in — arrived and not yet departed).
+- **Runtime validation with informative errors:** Missing required params throw `ConfigurationError` locally before any HTTP request, with error messages that name the field and show an example call.
+- **Status normalization:** `normalizeReservation()` rewrites legacy American `canceled` → British `cancelled` in `statusHistory[].status`, so agents doing strict-equality comparisons get correct results.
+- **PII + business-identity sanitization:** Recursive masking of guest PII (`email`, `phone`, names), credentials (`token`, `secret`), and business identity (`taxId`, `vat`, `bankAccount`, `streetLine*`, `postalCode`) in both debug output and thrown `ValidationError.fields`.
+- **URL path encoding:** Every `${id}` interpolation goes through `encodeURIComponent()`, preventing path traversal via attacker-controlled IDs.
 
 ---
 
@@ -71,9 +78,11 @@ Hospitable provides a world-class platform for Short-Term Rental (STR) managemen
 
 ### 5.2 Security
 
-- Credentials never written to disk.
-- Guest PII automatically masked in all debug log output.
+- Credentials never written to disk; PAT lives only in process memory or env.
+- Guest PII + business identity automatically masked in debug log output **and** in `ValidationError.fields` on thrown errors (Sentry/winston-safe by default).
 - `Authorization` headers stripped from sanitized logs.
+- Path traversal prevention: every URL path parameter is encoded with `encodeURIComponent()` at the interpolation site, so attacker-controlled IDs cannot rewrite the request path.
+- Sensitive fields redacted: guest PII (`email`, `phone`, `firstName`, `lastName`, …), credentials (`token`, `secret`, `apiKey`, `authorization`), and business identity (`taxId`, `vat`, `bankAccount`, `streetLine1/2`, `postalCode`).
 
 ### 5.3 Reliability
 
@@ -108,7 +117,9 @@ Hospitable provides a world-class platform for Short-Term Rental (STR) managemen
 | Test coverage (statements) | > 95% | ✅ 100% |
 | Test coverage (branches) | > 95% | ✅ 97.77% |
 | Test coverage (functions) | > 95% | ✅ 100% |
-| Test count | — | ✅ 316 tests across 18 files |
+| Test count | — | ✅ 420 tests across 22 files |
+| Resource coverage | All read-heavy Public API endpoints | ✅ 9 resources (properties, reservations, inquiries, calendar, messages, reviews, user, transactions, payouts) |
+| Schema drift between declared types and live API | 0 | ✅ Empirically verified via probe scripts; regression guards in place |
 
 ---
 

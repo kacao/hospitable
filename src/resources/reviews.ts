@@ -20,7 +20,10 @@ export class ReviewsResource {
     if (params.include !== undefined) normalized['include'] = params.include
     if (params.perPage !== undefined) normalized['perPage'] = params.perPage
     if (params.page !== undefined) normalized['page'] = params.page
-    return this.http.get<ReviewList>(`/v2/properties/${propertyId}/reviews`, normalized)
+    return this.http.get<ReviewList>(
+      `/v2/properties/${encodeURIComponent(propertyId)}/reviews`,
+      normalized,
+    )
   }
 
   /**
@@ -39,7 +42,10 @@ export class ReviewsResource {
    * @see POST https://public.api.hospitable.com/v2/reviews/{id}/respond
    */
   async respond(id: string, responseText: string): Promise<Review> {
-    return this.http.post<Review>(`/v2/reviews/${id}/respond`, { response: responseText })
+    return this.http.post<Review>(
+      `/v2/reviews/${encodeURIComponent(id)}/respond`,
+      { response: responseText },
+    )
   }
 
   /**

@@ -3,6 +3,12 @@
  *
  * Values are lowercase snake_case strings. Use {@link isReservationStatus}
  * to narrow an unknown string to this type.
+ *
+ * ⚠️ Spelling trap: the legacy {@link Reservation.status} and
+ * {@link ReservationStatusHistoryEntry} fields use British `cancelled`, while
+ * the older {@link ReservationLegacyStatusHistoryEntry} (exposed on the
+ * `status_history` field) uses American `canceled`. New code should read
+ * {@link Reservation.reservationStatus} and avoid both legacy shapes.
  */
 export type ReservationStatus =
   | 'not_accepted'
@@ -33,13 +39,31 @@ export type ReservationPlatform = 'airbnb' | 'vrbo' | 'booking_com' | 'direct' |
 
 /**
  * Include fields accepted by `GET /v2/reservations` and `GET /v2/reservations/{id}`.
+ *
+ * Empirically verified against the live API on 2026-04-11. Unknown includes
+ * are silently ignored by the server — passing an invalid value won't error,
+ * it just won't populate any extra fields.
  */
 export type ReservationIncludeField =
   | 'guest'
-  | 'properties'
+  | 'user'
   | 'financials'
   | 'listings'
-  | 'user'
+  | 'properties'
+  | 'review'
+
+/**
+ * Selector for which date field `startDate`/`endDate` filter against.
+ *
+ * - `checkin` (default) — filter by `check_in` date. Use this to find
+ *   reservations arriving in a window.
+ * - `checkout` — filter by `check_out` date. Use this to find reservations
+ *   departing in a window, or guests currently in-house.
+ *
+ * The API only accepts these two literal values. Other values (including
+ * `checkin_or_checkout`) return 400.
+ */
+export type ReservationDateQuery = 'checkin' | 'checkout'
 
 export interface Guest {
   id: string
@@ -60,9 +84,50 @@ export interface ReservationGuests {
   petCount: number
 }
 
+/**
+ * Structured status object returned by the current API on the
+ * `reservation_status` field. Carries both the current state and a full
+ * history of transitions with sub-category detail the flat {@link
+ * Reservation.status} string cannot express (e.g. `accepted` +
+ * `early_checkin_requested`).
+ *
+ * Prefer this over {@link Reservation.status} / {@link Reservation.statusHistory}
+ * in new code.
+ */
+export interface ReservationStatusObject {
+  current: {
+    category: ReservationStatus
+    subCategory: string | null
+  }
+  history: ReservationStatusHistoryEntry[]
+}
+
+export interface ReservationStatusHistoryEntry {
+  category: ReservationStatus
+  subCategory: string | null
+  changedAt: string
+}
+
+/**
+ * Legacy status history entry exposed on the `status_history` field.
+ *
+ * ⚠️ The `status` field here uses **American** spelling (`canceled`) while
+ * everything else in the API uses British spelling (`cancelled`). Strict
+ * equality against `'cancelled'` will silently miss matches. Migrate to
+ * {@link ReservationStatusObject.history} which uses consistent British spelling.
+ *
+ * @deprecated Use {@link Reservation.reservationStatus}.
+ */
+export interface ReservationLegacyStatusHistoryEntry {
+  /** Human-readable label, e.g. "Accepted", "Cancelled". */
+  category: string
+  /** Raw status value — **uses American spelling** (`canceled` vs `cancelled`). */
+  status: string
+  changedAt: string
+}
+
 export interface Reservation {
   id: string
-  propertyId?: string
   code: string
   platform: ReservationPlatform
   platformId: string
@@ -74,9 +139,57 @@ export interface Reservation {
   nights: number
   stayType: string
   ownerStay: boolean | null
+
+  /**
+   * Structured status with history. Preferred over {@link status} and
+   * {@link statusHistory} — carries sub-category detail the flat string
+   * cannot express, and uses consistent British spelling throughout.
+   */
+  reservationStatus: ReservationStatusObject
+
+  /**
+   * Legacy flat status string. Uses British spelling (`cancelled`).
+   * @deprecated Read {@link reservationStatus}.current.category instead.
+   */
   status: ReservationStatus
+
+  /**
+   * Legacy status history array.
+   *
+   * ⚠️ **Spelling trap**: each entry's `.status` field uses **American**
+   * spelling (`canceled`) while the modern {@link ReservationStatus} union
+   * uses British spelling (`cancelled`). Strict-equality checks against
+   * `'cancelled'` would silently miss matches on raw API data.
+   *
+   * The SDK's `ReservationsResource` normalizes this on every response
+   * (via `normalizeReservation()`), so you'll actually see `'cancelled'`
+   * here when reading through the client. But if you receive a Reservation
+   * from any other source — webhook payload, cached pre-normalization,
+   * hand-constructed test fixture — the raw value may still be `'canceled'`.
+   *
+   * @deprecated Read {@link reservationStatus}.history instead — it uses
+   *   consistent British spelling upstream and includes `subCategory`
+   *   detail this legacy field can't express.
+   */
+  statusHistory: ReservationLegacyStatusHistoryEntry[]
+
   guests: ReservationGuests
+  /** Only populated when `include=guest` is requested. */
   guest?: Guest
+  /** Only populated when `include=user` is requested. */
+  user?: ReservationUser
+  /** Only populated when `include=financials` is requested. */
+  financials?: unknown
+  /** Only populated when `include=properties` is requested. */
+  properties?: unknown[]
+  /** Only populated when `include=listings` is requested. */
+  listings?: unknown[]
+  /**
+   * Only populated when `include=review` is requested. `null` when the
+   * reservation has no review yet (e.g. still in progress, or cancelled).
+   */
+  review?: unknown | null
+
   notes: string | null
   conversationId: string
   conversationLanguage: string | null
@@ -84,21 +197,85 @@ export interface Reservation {
   issueAlert: unknown
 }
 
+/** User/host attached to a reservation via `include=user`. */
+export interface ReservationUser {
+  id: string
+  email: string
+  name: string
+  profilePicture: string | null
+}
+
 export type ReservationList = import('./pagination').PaginatedResponse<Reservation>
 
+/**
+ * Normalize a Reservation returned by the API so legacy fields are safe
+ * to compare against modern `ReservationStatus` values.
+ *
+ * Specifically: the legacy `status_history[].status` field uses American
+ * spelling (`canceled`), while every other status field in the API uses
+ * British spelling (`cancelled`). An agent doing
+ * `r.statusHistory.some(h => h.status === 'cancelled')` would silently
+ * miss cancelled reservations — a business-logic bug with real financial
+ * impact (charges sent to guests who canceled, "in-house" classification
+ * of guests who canceled, etc.).
+ *
+ * This normalizer rewrites `canceled` → `cancelled` in place on each
+ * `statusHistory` entry's `status` field. It's called by
+ * `ReservationsResource.list()`, `.get()`, and `.iter()` so consumers
+ * always see consistent British spelling.
+ *
+ * Idempotent and safe on partial / incomplete data: missing fields are
+ * left alone.
+ *
+ * Contract:
+ *  - Mutates and returns the same reservation object.
+ *  - Only touches `statusHistory[].status` when the value is exactly
+ *    `'canceled'` — any other value is preserved.
+ */
+export function normalizeReservation(reservation: Reservation): Reservation {
+  if (Array.isArray(reservation.statusHistory)) {
+    for (const entry of reservation.statusHistory) {
+      if (entry.status === 'canceled') {
+        entry.status = 'cancelled'
+      }
+    }
+  }
+  return reservation
+}
+
 export interface ReservationListParams {
-  /** Property UUIDs to scope the search to. */
-  properties?: string[]
-  /** ISO `YYYY-MM-DD` — reservations whose check-in is on or after this date. */
+  /**
+   * Property UUIDs to scope the search to. **Required by the API** — omit
+   * this and the server returns `400 "The properties field is required."`.
+   * The SDK throws a {@link ConfigurationError} before the request is sent
+   * so agents get actionable feedback without a round trip.
+   */
+  properties: string[]
+  /** ISO `YYYY-MM-DD` — lower bound on the date field chosen by `dateQuery`. */
   startDate?: string
-  /** ISO `YYYY-MM-DD` — reservations whose check-in is on or before this date. */
+  /** ISO `YYYY-MM-DD` — upper bound on the date field chosen by `dateQuery`. */
   endDate?: string
+  /**
+   * Which date field `startDate`/`endDate` filter against.
+   * Defaults to `checkin` on the API side if omitted.
+   */
+  dateQuery?: ReservationDateQuery
+  /**
+   * Only reservations whose last-message timestamp is on or after this value.
+   *
+   * ⚠️ Format quirk: the API expects **`YYYY-MM-DD HH:MM:SS`** (space-separated,
+   * no timezone), NOT ISO 8601. Example: `'2026-01-15 14:30:00'`.
+   */
+  lastMessageAt?: string
   /**
    * Filter by reservation status. Single value or array. Serialized as
    * repeated `status[]=` query params.
    */
   status?: ReservationStatus | ReservationStatus[]
-  /** Comma-separated include fields. Prefer {@link ReservationIncludeField}. */
+  /**
+   * Comma-separated include fields. Prefer {@link ReservationIncludeField}.
+   * Unknown values are silently ignored by the API.
+   */
   include?: string
   page?: number
   perPage?: number

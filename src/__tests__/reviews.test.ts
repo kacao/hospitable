@@ -8,22 +8,24 @@ import { makeHttpClient } from './helpers'
 function makeReview(overrides: Partial<Review> = {}): Review {
   return {
     id: 'rev-1',
-    reservationId: 'res-1',
-    propertyId: 'prop-1',
-    guestName: 'Jane Doe',
-    ratings: {
-      overall: 5,
-      cleanliness: 5,
-      communication: 5,
-      checkIn: 5,
-      accuracy: 5,
-      location: 5,
-      value: 5,
+    platform: 'airbnb',
+    public: {
+      rating: 5,
+      ratingPlatformOriginal: '5.00',
+      review: 'Great stay!',
+      response: null,
     },
-    body: 'Great stay!',
-    response: null,
-    submittedAt: '2026-01-01T00:00:00Z',
+    private: {
+      feedback: null,
+      detailedRatings: [
+        { type: 'cleanliness', rating: 5, comment: null },
+        { type: 'communication', rating: 5, comment: null },
+        { type: 'value', rating: 5, comment: null },
+      ],
+    },
+    reviewedAt: '2026-01-01T00:00:00+00:00',
     respondedAt: null,
+    canRespond: true,
     ...overrides,
   }
 }
@@ -82,7 +84,15 @@ describe('ReviewsResource', () => {
 
   describe('respond()', () => {
     it('POSTs to /v2/reviews/{id}/respond with { response: text }', async () => {
-      const updated = makeReview({ response: 'Thank you!', respondedAt: '2026-01-02T00:00:00Z' })
+      const updated = makeReview({
+        public: {
+          rating: 5,
+          ratingPlatformOriginal: '5.00',
+          review: 'Great stay!',
+          response: 'Thank you!',
+        },
+        respondedAt: '2026-01-02T00:00:00+00:00',
+      })
       vi.mocked(http.post).mockResolvedValue(updated)
 
       const result = await resource.respond('rev-1', 'Thank you!')

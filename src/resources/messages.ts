@@ -39,7 +39,9 @@ export class MessagesResource {
    * @see GET https://public.api.hospitable.com/v2/reservations/{uuid}/messages
    */
   async list(reservationId: string): Promise<MessageThread> {
-    const response = await this.http.get<{ data: Message[] }>(`/v2/reservations/${reservationId}/messages`)
+    const response = await this.http.get<{ data: Message[] }>(
+      `/v2/reservations/${encodeURIComponent(reservationId)}/messages`,
+    )
     return {
       reservationId,
       messages: response.data ?? [],
@@ -66,7 +68,7 @@ export class MessagesResource {
   ): Promise<MessageReceipt> {
     const payload: { body: string } & SendReservationMessageOptions = { body, ...options }
     const response = await this.http.post<{ data: MessageReceipt }>(
-      `/v2/reservations/${reservationId}/messages`,
+      `/v2/reservations/${encodeURIComponent(reservationId)}/messages`,
       payload,
     )
     return response.data
@@ -98,7 +100,7 @@ export class MessagesResource {
   ): Promise<MessageReceipt> {
     const payload: { body: string } & SendMessageOptions = { body, ...options }
     const response = await this.http.post<{ data: MessageReceipt }>(
-      `/v2/inquiries/${inquiryUuid}/messages`,
+      `/v2/inquiries/${encodeURIComponent(inquiryUuid)}/messages`,
       payload,
     )
     return response.data
@@ -125,7 +127,7 @@ export class MessagesResource {
     variables: Record<string, string> = {},
   ): Promise<Message> {
     const response = await this.http.post<{ data: Message }>(
-      `/v2/reservations/${reservationId}/messages/template`,
+      `/v2/reservations/${encodeURIComponent(reservationId)}/messages/template`,
       { templateId, variables },
     )
     return response.data

@@ -45,7 +45,7 @@ describe('status array regression — integration', () => {
       const calls = captureFetch(200, EMPTY_LIST)
       const client = new HospitableClient({ token: 'test' })
 
-      await client.reservations.list({ status: ['accepted', 'request'] })
+      await client.reservations.list({ properties: ['p'], status: ['accepted', 'request'] })
 
       const url = new URL(calls[0]!.url)
       expect(url.searchParams.getAll('status[]')).toEqual(['accepted', 'request'])
@@ -57,7 +57,7 @@ describe('status array regression — integration', () => {
       const calls = captureFetch(200, EMPTY_LIST)
       const client = new HospitableClient({ token: 'test' })
 
-      await client.reservations.list({ status: 'request' })
+      await client.reservations.list({ properties: ['p'], status: 'request' })
 
       const url = new URL(calls[0]!.url)
       expect(url.searchParams.getAll('status[]')).toEqual(['request'])
@@ -66,9 +66,10 @@ describe('status array regression — integration', () => {
     it('sends all five status values as separate array entries', async () => {
       const calls = captureFetch(200, EMPTY_LIST)
       const client = new HospitableClient({ token: 'test' })
-      const allStatuses = ['not_accepted', 'request', 'accepted', 'cancelled', 'checkpoint']
+      const allStatuses: readonly ['not_accepted', 'request', 'accepted', 'cancelled', 'checkpoint'] =
+        ['not_accepted', 'request', 'accepted', 'cancelled', 'checkpoint']
 
-      await client.reservations.list({ status: allStatuses })
+      await client.reservations.list({ properties: ['p'], status: [...allStatuses] })
 
       const url = new URL(calls[0]!.url)
       expect(url.searchParams.getAll('status[]')).toEqual(allStatuses)
@@ -78,9 +79,9 @@ describe('status array regression — integration', () => {
       const calls = captureFetch(200, EMPTY_LIST)
       const client = new HospitableClient({ token: 'test' })
 
-      await client.reservations.list({ startDate: '2026-01-01' })
+      await client.reservations.list({ properties: ['p'], startDate: '2026-01-01' })
 
-      expect(calls[0]!.url).not.toContain('status')
+      expect(calls[0]!.url).not.toContain('status[')
     })
   })
 
@@ -104,6 +105,7 @@ describe('status array regression — integration', () => {
       const client = new HospitableClient({ token: 'test' })
 
       await client.reservations.list({
+        properties: ['p'],
         status: ['accepted'],
         startDate: '2026-01-01',
         endDate: '2026-12-31',
@@ -124,6 +126,7 @@ describe('status array regression — integration', () => {
       const client = new HospitableClient({ token: 'test' })
 
       await client.reservations.list({
+        properties: ['p'],
         startDate: '2026-03-01',
         endDate: '2026-03-31',
         perPage: 25,
@@ -156,7 +159,6 @@ describe('status array regression — integration', () => {
       const apiResponse = {
         data: [{
           id: 'res-1',
-          property_id: 'prop-1',
           code: 'ABC123',
           platform: 'airbnb',
           platform_id: 'air-1',
@@ -168,7 +170,20 @@ describe('status array regression — integration', () => {
           nights: 4,
           stay_type: 'guest',
           owner_stay: null,
+          reservation_status: {
+            current: { category: 'accepted', sub_category: null },
+            history: [
+              {
+                category: 'accepted',
+                sub_category: null,
+                changed_at: '2026-01-15T00:00:00+00:00',
+              },
+            ],
+          },
           status: 'accepted',
+          status_history: [
+            { category: 'Accepted', status: 'accepted', changed_at: '2026-01-15T00:00:00+00:00' },
+          ],
           guests: {
             total: 2,
             adult_count: 2,
@@ -189,10 +204,9 @@ describe('status array regression — integration', () => {
       captureFetch(200, apiResponse)
       const client = new HospitableClient({ token: 'test' })
 
-      const result = await client.reservations.list()
+      const result = await client.reservations.list({ properties: ['p'] })
       const res = result.data[0]!
 
-      expect(res.propertyId).toBe('prop-1')
       expect(res.arrivalDate).toBe('2026-03-01')
       expect(res.departureDate).toBe('2026-03-05')
       expect(res.checkIn).toBe('15:00')
@@ -207,6 +221,225 @@ describe('status array regression — integration', () => {
       expect(result.meta.currentPage).toBe(1)
       expect(result.meta.lastPage).toBe(1)
       expect(result.meta.perPage).toBe(20)
+    })
+
+    it('normalizes legacy statusHistory american "canceled" to british "cancelled"', async () => {
+      // Regression guard for the spelling-trap bug class. An agent doing
+      // `r.statusHistory.some(h => h.status === 'cancelled')` would
+      // silently miss matches if the SDK didn't normalize the legacy
+      // field. Normalization is applied in normalizeReservation() and
+      // wired into list/get/iter from ReservationsResource.
+      const apiResponse = {
+        data: [{
+          id: 'res-legacy',
+          code: 'LEGACY1',
+          platform: 'airbnb',
+          platform_id: 'a1',
+          booking_date: '2026-01-01',
+          arrival_date: '2026-03-01',
+          departure_date: '2026-03-05',
+          check_in: '15:00',
+          check_out: '11:00',
+          nights: 4,
+          stay_type: 'guest',
+          owner_stay: null,
+          reservation_status: {
+            current: { category: 'cancelled', sub_category: null },
+            history: [],
+          },
+          status: 'cancelled',
+          // API uses American 'canceled' here — SDK must normalize
+          status_history: [
+            { category: 'Accepted', status: 'accepted', changed_at: '2026-01-01T00:00:00+00:00' },
+            { category: 'Canceled', status: 'canceled', changed_at: '2026-01-15T00:00:00+00:00' },
+          ],
+          guests: { total: 1, adult_count: 1, child_count: 0, infant_count: 0, pet_count: 0 },
+          notes: null,
+          conversation_id: 'conv-1',
+          conversation_language: null,
+          last_message_at: null,
+          issue_alert: null,
+        }],
+        meta: { current_page: 1, last_page: 1, per_page: 1, total: 1 },
+        links: { first: null, last: null, prev: null, next: null },
+      }
+      captureFetch(200, apiResponse)
+      const client = new HospitableClient({ token: 'test' })
+      const result = await client.reservations.list({ properties: ['p'] })
+      const res = result.data[0]!
+
+      // Normalized to British spelling
+      expect(res.statusHistory[1]!.status).toBe('cancelled')
+      expect(res.statusHistory[0]!.status).toBe('accepted') // untouched
+      // Agent-safe query now works
+      expect(res.statusHistory.some((h) => h.status === 'cancelled')).toBe(true)
+    })
+
+    it('normalization is idempotent — re-normalizing produces the same result', async () => {
+      // Guard: if someone accidentally double-wraps normalize calls,
+      // the result should still be stable.
+      const apiResponse = {
+        data: [{
+          id: 'res-1',
+          code: 'X',
+          platform: 'airbnb',
+          platform_id: 'a1',
+          booking_date: '2026-01-01',
+          arrival_date: '2026-03-01',
+          departure_date: '2026-03-05',
+          check_in: '15:00',
+          check_out: '11:00',
+          nights: 4,
+          stay_type: 'guest',
+          owner_stay: null,
+          reservation_status: { current: { category: 'cancelled', sub_category: null }, history: [] },
+          status: 'cancelled',
+          status_history: [{ category: 'Canceled', status: 'canceled', changed_at: '2026-01-15T00:00:00+00:00' }],
+          guests: { total: 1, adult_count: 1, child_count: 0, infant_count: 0, pet_count: 0 },
+          notes: null,
+          conversation_id: 'conv-1',
+          conversation_language: null,
+          last_message_at: null,
+          issue_alert: null,
+        }],
+        meta: { current_page: 1, last_page: 1, per_page: 1, total: 1 },
+        links: { first: null, last: null, prev: null, next: null },
+      }
+      captureFetch(200, apiResponse)
+      const client = new HospitableClient({
+        token: 'test',
+        cache: { reservations: { enabled: true, ttl: 60_000 } },
+      })
+      // Two consecutive calls hit the same cache entry, so the same
+      // (already-normalized) object is returned twice. That object
+      // must still have the normalized spelling.
+      const r1 = await client.reservations.list({ properties: ['p'] })
+      const r2 = await client.reservations.list({ properties: ['p'] })
+      expect(r1.data[0]!.statusHistory[0]!.status).toBe('cancelled')
+      expect(r2.data[0]!.statusHistory[0]!.status).toBe('cancelled')
+    })
+
+    it('deserializes reservationStatus nested object (new structured format)', async () => {
+      const apiResponse = {
+        data: [{
+          id: 'res-1',
+          code: 'ABC123',
+          platform: 'airbnb',
+          platform_id: 'a1',
+          booking_date: '2026-01-15',
+          arrival_date: '2026-03-01',
+          departure_date: '2026-03-05',
+          check_in: '15:00',
+          check_out: '11:00',
+          nights: 4,
+          stay_type: 'guest',
+          owner_stay: null,
+          reservation_status: {
+            current: { category: 'accepted', sub_category: 'early_checkin_requested' },
+            history: [
+              {
+                category: 'request',
+                sub_category: null,
+                changed_at: '2026-01-10T00:00:00+00:00',
+              },
+              {
+                category: 'accepted',
+                sub_category: null,
+                changed_at: '2026-01-15T00:00:00+00:00',
+              },
+            ],
+          },
+          status: 'accepted',
+          status_history: [],
+          guests: { total: 1, adult_count: 1, child_count: 0, infant_count: 0, pet_count: 0 },
+          notes: null,
+          conversation_id: 'conv-1',
+          conversation_language: null,
+          last_message_at: null,
+          issue_alert: null,
+        }],
+        meta: { current_page: 1, last_page: 1, per_page: 1, total: 1 },
+        links: { first: null, last: null, prev: null, next: null },
+      }
+      captureFetch(200, apiResponse)
+      const client = new HospitableClient({ token: 'test' })
+
+      const result = await client.reservations.list({ properties: ['p'] })
+      const res = result.data[0]!
+
+      expect(res.reservationStatus.current.category).toBe('accepted')
+      expect(res.reservationStatus.current.subCategory).toBe('early_checkin_requested')
+      expect(res.reservationStatus.history).toHaveLength(2)
+      expect(res.reservationStatus.history[0]!.category).toBe('request')
+      expect(res.reservationStatus.history[1]!.changedAt).toBe('2026-01-15T00:00:00+00:00')
+    })
+  })
+
+  describe('messages response: snake_case API → camelCase SDK round-trip', () => {
+    it('deserializes all new Message fields from raw snake_case payload', async () => {
+      // Regression guard for the message schema audit. Previous tests
+      // built camelCased factory objects which never exercise the
+      // deepSnakeToCamel layer. This test sends a raw snake_case payload
+      // and asserts every new field (platformId, contentType, reactions,
+      // integration, sender.location) correctly rolls through.
+      const apiResponse = {
+        data: [{
+          id: 939948414,
+          platform: 'airbnb',
+          platform_id: '27256560910',
+          conversation_id: 'b6b514a6-bb08-48f6-858c-8dd36af35388',
+          reservation_id: 'res-1',
+          content_type: 'text/plain',
+          body: 'Hello guest',
+          attachments: [
+            { type: 'image', url: 'https://a0.muscache.com/signed.png?sig=abc' },
+          ],
+          reactions: [],
+          sender_type: 'guest',
+          sender_role: null,
+          sender: {
+            first_name: 'Dave',
+            full_name: 'Dave McGrath',
+            locale: 'en',
+            picture_url: 'https://a0.muscache.com/profile.jpg',
+            thumbnail_url: 'https://a0.muscache.com/thumb.jpg',
+            location: 'Kippa-Ring, Australia',
+          },
+          created_at: '2025-08-30T17:59:27Z',
+          source: 'public_api',
+          integration: null,
+          sent_reference_id: 'ref-abc',
+        }],
+      }
+      captureFetch(200, apiResponse)
+      const client = new HospitableClient({ token: 'test' })
+
+      const thread = await client.messages.list('res-1')
+      const msg = thread.messages[0]!
+
+      // Every new field must round-trip correctly
+      expect(msg.platformId).toBe('27256560910')
+      expect(msg.conversationId).toBe('b6b514a6-bb08-48f6-858c-8dd36af35388')
+      expect(msg.reservationId).toBe('res-1')
+      expect(msg.contentType).toBe('text/plain')
+      expect(msg.reactions).toEqual([])
+      expect(msg.senderType).toBe('guest')
+      expect(msg.senderRole).toBe(null)
+      expect(msg.source).toBe('public_api')
+      expect(msg.integration).toBe(null)
+      expect(msg.sentReferenceId).toBe('ref-abc')
+
+      // Nested sender field with snake→camel
+      expect(msg.sender.firstName).toBe('Dave')
+      expect(msg.sender.fullName).toBe('Dave McGrath')
+      expect(msg.sender.pictureUrl).toBe('https://a0.muscache.com/profile.jpg')
+      expect(msg.sender.thumbnailUrl).toBe('https://a0.muscache.com/thumb.jpg')
+      expect(msg.sender.location).toBe('Kippa-Ring, Australia')
+
+      // Typed attachment array with correct shape
+      expect(msg.attachments).toHaveLength(1)
+      expect(msg.attachments[0]!.type).toBe('image')
+      expect(msg.attachments[0]!.url).toContain('signed.png')
     })
   })
 
@@ -374,7 +607,7 @@ describe('status array regression — integration', () => {
       const calls = captureFetch(200, EMPTY_LIST)
       const client = new HospitableClient({ token: 'test' })
 
-      const filter = new ReservationFilter().status('request')
+      const filter = new ReservationFilter().properties(['p']).status('request')
       await client.reservations.list(filter.toParams())
 
       const url = new URL(calls[0]!.url)
@@ -410,7 +643,10 @@ describe('status array regression — integration', () => {
 
       const client = new HospitableClient({ token: 'test' })
       const items = []
-      for await (const res of client.reservations.iter({ status: ['accepted', 'request'] })) {
+      for await (const res of client.reservations.iter({
+        properties: ['p'],
+        status: ['accepted', 'request'],
+      })) {
         items.push(res)
       }
 
@@ -429,8 +665,8 @@ describe('status array regression — integration', () => {
       captureFetch(200, EMPTY_LIST)
       const client = new HospitableClient({ token: 'test', cache: { reservations: { enabled: true, ttl: 60_000 } } })
 
-      await client.reservations.list({ status: ['accepted'] })
-      await client.reservations.list({ status: 'accepted' })
+      await client.reservations.list({ properties: ['p'], status: ['accepted'] })
+      await client.reservations.list({ properties: ['p'], status: 'accepted' })
 
       expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(1)
     })

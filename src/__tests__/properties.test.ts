@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { PropertiesResource } from '../resources/properties'
 import type { HttpClient } from '../http/client'
-import type { Property, PropertyTag } from '../models/property'
+import type { Property, PropertyImage, PropertyTag } from '../models/property'
 import type { PaginatedResponse } from '../models/pagination'
 import { makeHttpClient } from './helpers'
 
@@ -34,7 +34,9 @@ const mockProperty: Property = {
   roomType: 'entire_home',
   tags: [],
   houseRules: { petsAllowed: false, smokingAllowed: false, eventsAllowed: false },
+  roomDetails: [],
   calendarRestricted: false,
+  parentChild: null,
 }
 
 const mockPropertyList: PaginatedResponse<Property> = {
@@ -78,6 +80,70 @@ describe('PropertiesResource', () => {
     const result = await resource.listTags('prop-1')
     expect(http.get).toHaveBeenCalledWith('/v2/properties/prop-1/tags')
     expect(result).toEqual(tags)
+  })
+
+  it('getImages(id) calls GET /v2/properties/{id}/images and returns the .data array', async () => {
+    const images: PropertyImage[] = [
+      {
+        url: 'https://example.com/1.jpg',
+        thumbnailUrl: 'https://example.com/1-thumb.jpg',
+        caption: 'Living room',
+        order: 0,
+        lastUpdatedAt: '2026-01-01T00:00:00Z',
+      },
+      {
+        url: 'https://example.com/2.jpg',
+        thumbnailUrl: 'https://example.com/2-thumb.jpg',
+        caption: '',
+        order: 1,
+        lastUpdatedAt: '2026-01-02T00:00:00Z',
+      },
+    ]
+    vi.mocked(http.get).mockResolvedValue({ data: images })
+
+    const result = await resource.getImages('prop-1')
+
+    expect(http.get).toHaveBeenCalledWith('/v2/properties/prop-1/images')
+    expect(result).toEqual(images)
+    expect(result[0]!.order).toBe(0)
+    expect(result[1]!.caption).toBe('')
+  })
+
+  it('search() passes startDate, endDate, and adults as-is', async () => {
+    vi.mocked(http.get).mockResolvedValue(mockPropertyList)
+    await resource.search({
+      startDate: '2026-06-01',
+      endDate: '2026-06-05',
+      adults: 2,
+    })
+    expect(http.get).toHaveBeenCalledWith(
+      '/v2/properties/search',
+      expect.objectContaining({
+        startDate: '2026-06-01',
+        endDate: '2026-06-05',
+        adults: 2,
+      }),
+    )
+  })
+
+  it('search() forwards optional party-size fields', async () => {
+    vi.mocked(http.get).mockResolvedValue(mockPropertyList)
+    await resource.search({
+      startDate: '2026-06-01',
+      endDate: '2026-06-05',
+      adults: 2,
+      children: 1,
+      infants: 0,
+      pets: 1,
+    })
+    expect(http.get).toHaveBeenCalledWith(
+      '/v2/properties/search',
+      expect.objectContaining({
+        children: 1,
+        infants: 0,
+        pets: 1,
+      }),
+    )
   })
 
   it('iter() yields items across 2 pages', async () => {

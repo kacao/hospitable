@@ -161,7 +161,9 @@ const mockProperty: Property = {
   roomType: 'entire_home',
   tags: [],
   houseRules: { petsAllowed: false, smokingAllowed: false, eventsAllowed: false },
+  roomDetails: [],
   calendarRestricted: false,
+  parentChild: null,
 }
 
 function makePropertyList(data: Property[] = [mockProperty]): PaginatedResponse<Property> {
@@ -314,8 +316,8 @@ describe('ReservationsResource caching', () => {
     }
     vi.mocked(http.get).mockResolvedValue(list)
 
-    await resource.list({ status: 'accepted' })
-    await resource.list({ status: 'accepted' })
+    await resource.list({ properties: ['p'], status: 'accepted' })
+    await resource.list({ properties: ['p'], status: 'accepted' })
 
     expect(http.get).toHaveBeenCalledTimes(1)
   })
@@ -330,8 +332,8 @@ describe('ReservationsResource caching', () => {
     }
     vi.mocked(http.get).mockResolvedValue(list)
 
-    await resource.list({ status: ['accepted'] })
-    await resource.list({ status: 'accepted' })
+    await resource.list({ properties: ['p'], status: ['accepted'] })
+    await resource.list({ properties: ['p'], status: 'accepted' })
 
     expect(http.get).toHaveBeenCalledTimes(1)
   })
@@ -347,13 +349,13 @@ describe('ReservationsResource caching', () => {
     }
     vi.mocked(http.get).mockResolvedValue(list)
 
-    await resource.list()
+    await resource.list({ properties: ['p'] })
     vi.advanceTimersByTime(59_999)
-    await resource.list()
+    await resource.list({ properties: ['p'] })
     expect(http.get).toHaveBeenCalledTimes(1)
 
     vi.advanceTimersByTime(2)
-    await resource.list()
+    await resource.list({ properties: ['p'] })
     expect(http.get).toHaveBeenCalledTimes(2)
   })
 
@@ -367,11 +369,11 @@ describe('ReservationsResource caching', () => {
     }
     vi.mocked(http.get).mockResolvedValue(list)
 
-    await resource.list()
+    await resource.list({ properties: ['p'] })
     expect(http.get).toHaveBeenCalledTimes(1)
 
     const items: Reservation[] = []
-    for await (const item of resource.iter()) {
+    for await (const item of resource.iter({ properties: ['p'] })) {
       items.push(item)
     }
     expect(http.get).toHaveBeenCalledTimes(2)

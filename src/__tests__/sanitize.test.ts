@@ -106,4 +106,112 @@ describe('sanitize', () => {
     // Should not throw and should return something (depth guard triggers)
     expect(() => sanitize(obj)).not.toThrow()
   })
+
+  describe('business / financial identity redaction', () => {
+    it('masks taxId, vat, and tax_id (snake_case variant)', () => {
+      expect(sanitize({ taxId: '12-3456789', vat: 'GB123456789' })).toEqual({
+        taxId: '***',
+        vat: '***',
+      })
+      expect(sanitize({ tax_id: '12-3456789' })).toEqual({ tax_id: '***' })
+    })
+
+    it('masks bankAccount and bank_account', () => {
+      expect(
+        sanitize({ bankAccount: 'Checking ••4169 (USD)' }),
+      ).toEqual({ bankAccount: '***' })
+      expect(
+        sanitize({ bank_account: 'Checking ••4169 (USD)' }),
+      ).toEqual({ bank_account: '***' })
+    })
+
+    it('masks billing address fine-grained fields', () => {
+      expect(
+        sanitize({
+          streetLine1: '123 Main St',
+          streetLine2: 'Apt 4',
+          postalCode: '90210',
+        }),
+      ).toEqual({
+        streetLine1: '***',
+        streetLine2: '***',
+        postalCode: '***',
+      })
+    })
+
+    it('masks snake_case address variants', () => {
+      expect(
+        sanitize({
+          street_line1: '123 Main St',
+          street_line2: 'Apt 4',
+          postal_code: '90210',
+        }),
+      ).toEqual({
+        street_line1: '***',
+        street_line2: '***',
+        postal_code: '***',
+      })
+    })
+
+    it('leaves broader location fields (city, state, country, company) unredacted', () => {
+      // Deliberate: these are too broad to be individually identifying,
+      // and redacting them cripples debugging. See sanitize.ts comment.
+      expect(
+        sanitize({
+          city: 'Anaheim',
+          state: 'CA',
+          country: 'US',
+          company: 'Acme Rentals LLC',
+        }),
+      ).toEqual({
+        city: 'Anaheim',
+        state: 'CA',
+        country: 'US',
+        company: 'Acme Rentals LLC',
+      })
+    })
+
+    it('leaves amounts unredacted (sensitive but not identifying)', () => {
+      expect(
+        sanitize({
+          amount: 19148,
+          paidOutAmount: { amount: 19148, formatted: '$191.48', currency: 'USD' },
+        }),
+      ).toEqual({
+        amount: 19148,
+        paidOutAmount: { amount: 19148, formatted: '$191.48', currency: 'USD' },
+      })
+    })
+
+    it('masks a full User response in one pass', () => {
+      const user = {
+        id: 'user-1',
+        email: 'host@example.com',
+        name: 'Host Name',
+        business: true,
+        company: 'Acme Rentals LLC',
+        vat: 'GB123456789',
+        taxId: '12-3456789',
+        streetLine1: '123 Main St',
+        streetLine2: null,
+        postalCode: '90210',
+        city: 'Anytown',
+        state: 'CA',
+        country: 'US',
+      }
+      const result = sanitize(user) as typeof user
+      expect(result.email).toBe('***')
+      expect(result.vat).toBe('***')
+      expect(result.taxId).toBe('***')
+      expect(result.streetLine1).toBe('***')
+      expect(result.postalCode).toBe('***')
+      // Unredacted, intentionally:
+      expect(result.id).toBe('user-1')
+      expect(result.name).toBe('Host Name')
+      expect(result.business).toBe(true)
+      expect(result.company).toBe('Acme Rentals LLC')
+      expect(result.city).toBe('Anytown')
+      expect(result.country).toBe('US')
+    })
+  })
 })

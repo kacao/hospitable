@@ -2,14 +2,21 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MessagesResource } from '../resources/messages'
 import type { HttpClient } from '../http/client'
 import { HospitableError, NotFoundError, RateLimitError } from '../errors'
-import type { Message, MessageTemplate, MessageReceipt } from '../models/message'
+import type {
+  Message,
+  MessageSource,
+  MessageTemplate,
+  MessageReceipt,
+} from '../models/message'
 
 function makeMessage(overrides: Partial<Message> = {}): Message {
   return {
     id: 'msg-1',
     platform: 'airbnb',
+    platformId: 'plat-msg-1',
     conversationId: 'conv-1',
     reservationId: 'res-1',
+    contentType: 'text/plain',
     body: 'Hello guest',
     senderType: 'host',
     senderRole: null,
@@ -19,11 +26,14 @@ function makeMessage(overrides: Partial<Message> = {}): Message {
       locale: 'en',
       pictureUrl: null,
       thumbnailUrl: null,
+      location: '',
     },
     createdAt: '2026-02-25T10:00:00Z',
     source: 'hospitable',
+    integration: null,
     sentReferenceId: null,
     attachments: [],
+    reactions: [],
     ...overrides,
   }
 }
@@ -89,6 +99,98 @@ describe('MessagesResource', () => {
       const err = await resource.list('res-42').catch((e) => e)
       expect(err).toBeInstanceOf(RateLimitError)
       expect((err as RateLimitError).retryAfter).toBe(15)
+    })
+
+    it('preserves platformId on returned messages', async () => {
+      const msg = makeMessage({ platformId: 'airbnb-27256560910' })
+      vi.mocked(http.get).mockResolvedValue({ data: [msg] })
+
+      const result = await resource.list('res-42')
+
+      expect(result.messages[0]!.platformId).toBe('airbnb-27256560910')
+    })
+
+    it('preserves contentType field (default text/plain)', async () => {
+      const msg = makeMessage()
+      vi.mocked(http.get).mockResolvedValue({ data: [msg] })
+
+      const result = await resource.list('res-42')
+
+      expect(result.messages[0]!.contentType).toBe('text/plain')
+    })
+
+    it('deserializes structured image attachments', async () => {
+      const msg = makeMessage({
+        attachments: [
+          { type: 'image', url: 'https://airbnb.s3.amazonaws.com/photo.png?sig=abc' },
+        ],
+      })
+      vi.mocked(http.get).mockResolvedValue({ data: [msg] })
+
+      const result = await resource.list('res-42')
+      const attachment = result.messages[0]!.attachments[0]!
+
+      expect(attachment.type).toBe('image')
+      expect(attachment.url).toContain('airbnb.s3')
+    })
+
+    it('preserves reactions array (opaque, empty by default)', async () => {
+      const msg = makeMessage({ reactions: [] })
+      vi.mocked(http.get).mockResolvedValue({ data: [msg] })
+
+      const result = await resource.list('res-42')
+
+      expect(result.messages[0]!.reactions).toEqual([])
+    })
+
+    it('preserves integration field (null by default)', async () => {
+      const msg = makeMessage({ integration: null })
+      vi.mocked(http.get).mockResolvedValue({ data: [msg] })
+
+      const result = await resource.list('res-42')
+
+      expect(result.messages[0]!.integration).toBe(null)
+    })
+
+    it('preserves sender.location on returned messages', async () => {
+      const msg = makeMessage({
+        sender: {
+          firstName: 'Dave',
+          fullName: 'Dave McGrath',
+          locale: 'en',
+          pictureUrl: null,
+          thumbnailUrl: null,
+          location: 'Kippa-Ring, Australia',
+        },
+      })
+      vi.mocked(http.get).mockResolvedValue({ data: [msg] })
+
+      const result = await resource.list('res-42')
+
+      expect(result.messages[0]!.sender.location).toBe('Kippa-Ring, Australia')
+    })
+
+    it('exposes all known message sources as string-compatible values', async () => {
+      // Regression guard: the source union includes hospitable, platform,
+      // automated, AI, public_api. Typed via the imported `MessageSource`
+      // union — if someone removes one of the five literals from the
+      // union, this file breaks at compile time because the array
+      // initializer would no longer satisfy `readonly MessageSource[]`.
+      //
+      // DO NOT inline the union as Array<'hospitable' | ...> here — that
+      // would hide union drift and defeat the guard entirely.
+      const sources: readonly MessageSource[] = [
+        'hospitable',
+        'platform',
+        'automated',
+        'AI',
+        'public_api',
+      ]
+      const messages = sources.map((s, i) => makeMessage({ id: `msg-${i}`, source: s }))
+      vi.mocked(http.get).mockResolvedValue({ data: messages })
+
+      const result = await resource.list('res-42')
+      expect(result.messages.map((m) => m.source)).toEqual(sources)
     })
   })
 

@@ -1,3 +1,5 @@
+import { sanitize } from './utils/sanitize'
+
 export class HospitableError extends Error {
   readonly statusCode: number
   readonly requestId: string | undefined
@@ -99,7 +101,14 @@ export function createErrorFromResponse(
       return new NotFoundError(message, requestId)
     case 400:
     case 422: {
-      const errors = (body['errors'] as Record<string, string[]> | undefined) ?? {}
+      // Sanitize before storing on the error instance — the raw `errors`
+      // object can echo back guest PII (e.g. `body[name]: "Invalid: Jane"`)
+      // or business identity (`tax_id: "The tax id '12-3456789' is ..."`)
+      // and any consumer that logs the caught error via Sentry/winston
+      // would leak it. Sanitize at construction so the default code path
+      // never touches an unredacted error body.
+      const rawErrors = (body['errors'] as Record<string, string[]> | undefined) ?? {}
+      const errors = sanitize(rawErrors) as Record<string, string[]>
       return new ValidationError(message, errors, requestId)
     }
     case 429: {

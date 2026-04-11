@@ -9,6 +9,9 @@ import { MessagesResource } from './resources/messages'
 import { PropertiesResource } from './resources/properties'
 import { ReservationsResource } from './resources/reservations'
 import { ReviewsResource } from './resources/reviews'
+import { UserResource } from './resources/user'
+import { TransactionsResource } from './resources/transactions'
+import { PayoutsResource } from './resources/payouts'
 
 export interface ResourceCacheConfig {
   properties?: CacheConfig
@@ -42,6 +45,9 @@ export class HospitableClient {
   readonly messages: MessagesResource
   readonly reviews: ReviewsResource
   readonly inquiries: InquiriesResource
+  readonly user: UserResource
+  readonly transactions: TransactionsResource
+  readonly payouts: PayoutsResource
 
   constructor(config: HospitableClientConfig = {}) {
     const baseURL = config.baseURL ?? 'https://public.api.hospitable.com'
@@ -75,5 +81,8 @@ export class HospitableClient {
     this.messages = new MessagesResource(httpClient)
     this.reviews = new ReviewsResource(httpClient)
     this.inquiries = new InquiriesResource(httpClient, config.cache?.inquiries)
+    this.user = new UserResource(httpClient)
+    this.transactions = new TransactionsResource(httpClient)
+    this.payouts = new PayoutsResource(httpClient)
   }
 }

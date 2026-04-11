@@ -356,19 +356,40 @@ describe('HttpClient', () => {
     })
 
     it('throws ValidationError with fields on 422', async () => {
-      mockFetch(422, { message: 'Invalid', errors: { email: ['is required'] } })
+      mockFetch(422, { message: 'Invalid', errors: { title: ['is required'] } })
       const client = makeClient()
       const err = await client.get('/listings').catch((e) => e)
       expect(err).toBeInstanceOf(ValidationError)
       expect(err.statusCode).toBe(422)
-      expect((err as ValidationError).fields).toEqual({ email: ['is required'] })
+      expect((err as ValidationError).fields).toEqual({ title: ['is required'] })
     })
 
     it('normalizes snake_case error bodies — ValidationError.fields works from API-shape payloads', async () => {
-      mockFetch(422, { message: 'Invalid', errors: { first_name: ['is required'] } })
+      mockFetch(422, { message: 'Invalid', errors: { room_type: ['is required'] } })
       const client = makeClient()
       const err = await client.get('/listings').catch((e) => e)
-      expect((err as ValidationError).fields).toEqual({ firstName: ['is required'] })
+      expect((err as ValidationError).fields).toEqual({ roomType: ['is required'] })
+    })
+
+    it('redacts PII field names on ValidationError — email/firstName never reach consumers', async () => {
+      // Regression guard: the SDK sanitizes ValidationError.fields at
+      // construction so Sentry/winston consumers don't leak PII or
+      // business identity via caught-error logging.
+      mockFetch(422, {
+        message: 'Invalid',
+        errors: {
+          email: ['is required'],
+          firstName: ['is required'],
+          taxId: ["The tax id '12-3456789' is invalid"],
+          title: ['is required'], // non-PII — passes through
+        },
+      })
+      const client = makeClient()
+      const err = (await client.get('/listings').catch((e) => e)) as ValidationError
+      expect(err.fields['email']).toBe('***')
+      expect(err.fields['firstName']).toBe('***')
+      expect(err.fields['taxId']).toBe('***')
+      expect(err.fields['title']).toEqual(['is required'])
     })
 
     it('throws RateLimitError with retryAfter on 429', async () => {
