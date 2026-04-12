@@ -1,4 +1,4 @@
-export const VERSION = '0.5.4'
+export const VERSION = '0.6.0'
 
 export { HospitableClient } from './client'
 export type { HospitableClientConfig, ResourceCacheConfig } from './client'
@@ -50,6 +50,8 @@ export { UserResource } from './resources'
 export { TransactionsResource } from './resources'
 
 export { PayoutsResource } from './resources'
+
+export { KnowledgeHubResource } from './resources'
 
 export { sanitize, MemoryCache, cacheKey } from './utils'
 export type { CacheConfig } from './utils'
