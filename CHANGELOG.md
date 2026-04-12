@@ -7,6 +7,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 with the caveat that **while at 0.x, breaking changes land on the minor version**
 (standard npm semver for pre-1.0 libraries).
 
+## [0.5.4] — 2026-04-11
+
+Schema audit against the 7 official Hospitable schema pages found three
+improvement opportunities. Two fields were typed as `unknown` and one
+field was missing entirely. All three are additive; shipping as a
+patch-level release.
+
+### ✨ Added
+
+- **`ReservationFinancials` interface** — `Reservation.financials` is
+  now a fully-typed structure instead of `unknown`. Full breakdown
+  covers `currency`, `guest` (accommodation, averageNightlyRate, fees,
+  discounts, taxes, adjustments, payments, totalPrice), and `host`
+  (accommodation, accommodationBreakdown, guestFees, hostFees,
+  discounts, adjustments, taxes, revenue). Every line item is a
+  `ReservationFinancialLineItem` with `{amount, formatted, label,
+  category}`. **⚠️ `amount` can be negative** — discounts and host
+  service fees arrive as negative integers. Empirically verified
+  against a real reservation: a `-$1,213.65` Early Bird Discount and a
+  `-$261.07` Host Service Fee correctly preserved their sign.
+
+- **`PropertyBookings` interface** — was typed as `unknown`, now a
+  concrete structure with `fees: PropertyBookingFee[]` (`{name, type,
+  value: {amount, formatted}}`), `occupancyBasedRules` (extra-guest
+  and pet fees with guest-count threshold), `listingMarkups[]`
+  (per-platform price markup), `bookingPolicies{cancellation[],
+  paymentTerms{status, description[], gracePeriod}}`, and `siteUrls[]`.
+  Empty-by-default fields (`discounts`, `securityDeposits`,
+  `securityDepositCollector`) are typed as `unknown`/`unknown[]` until
+  populated examples are observed.
+
+- **`Property.icalImports?: PropertyIcalImport[]`** — new field
+  previously missing from the SDK entirely. Contains external iCal
+  feeds synced into the property's calendar with `{id, url, name, host,
+  lastSyncAt, disconnectedAt}`. **⚠️ `icalImports[].url` is a shared
+  secret** (iCal URLs embed an opaque auth token in the path) — the
+  SDK does NOT redact `url` in `sanitize()` because the field name is
+  too common to blanket-mask; handle it in your own logging layer.
+
+  **Undocumented gating discovered during probe**: `icalImports` is
+  populated only when `include=listings` is requested (or a
+  multi-include containing `listings`). The Hospitable docs don't
+  mention this — it's empirically verified. The field is `undefined`
+  when `listings` isn't in the include list, not an empty array. The
+  JSDoc on `Property.icalImports` explicitly documents the gating so
+  agents don't assume the field is always present.
+
+- **New exported types**: `ReservationFinancials`,
+  `ReservationFinancialsGuest`, `ReservationFinancialsHost`,
+  `ReservationFinancialLineItem`, `PropertyBookingFee`,
+  `PropertyListingMarkup`, `PropertyOccupancyFee`,
+  `PropertyOccupancyBasedRules`, `PropertyPaymentTerms`,
+  `PropertyBookingPolicies`, `PropertyIcalImport`.
+
+### 📝 Changed
+
+- `Reservation.financials` type changed from `unknown` to
+  `ReservationFinancials`. Code that was casting to access fields
+  (`(r.financials as any).guest.total_price.formatted`) can now read
+  them directly (`r.financials?.guest.totalPrice.formatted`). **This is
+  a narrowing, not a widening** — existing `as any` casts continue to
+  work; new code gets full type narrowing.
+- `PropertyBookings` changed from `type PropertyBookings = unknown` to
+  a structured interface. Same narrowing story — existing `as any`
+  code paths still work, new code gets proper field narrowing.
+
+### 🧪 Tests
+
+- **447 tests** (up from 444 in 0.5.3). New coverage:
+  - `status-array-regression.test.ts` → 1 test for full
+    `ReservationFinancials` snake→camel round-trip with populated
+    fees, discounts (negative), taxes, accommodation_breakdown, and
+    host service fees
+  - `properties.test.ts` → 3 new tests:
+    1. `PropertyBookings` structured narrowing (replacing the old
+       "opaque unknown" test)
+    2. `icalImports` deserialization when `include=listings` is passed
+    3. `icalImports` is `undefined` (not `[]`) when `listings` isn't
+       in the include list — regression guard for the gating bug
+
+### 🔬 Method of discovery
+
+A new probe script `examples/probe-schemas.ts` walks every field of
+the 7 schemas referenced in the Hospitable docs, dumping the full
+shape of reservation, reservation financials, guest counts, guest
+info, property, message, and review. Committed to `examples/` as a
+reproducible audit tool. The Stoplight-hosted documentation pages
+themselves return skeleton HTML to static fetchers — the only
+authoritative source is the live API, probed with `include` values
+and inspected field-by-field.
+
+---
+
 ## [0.5.3] — 2026-04-11
 
 ### ✨ Added
@@ -271,3 +364,4 @@ any existing ADRs in `/decisions/` for architectural decisions.
 [0.5.1]: https://github.com/kacao/hospitable/releases/tag/v0.5.1
 [0.5.2]: https://github.com/kacao/hospitable/releases/tag/v0.5.2
 [0.5.3]: https://github.com/kacao/hospitable/releases/tag/v0.5.3
+[0.5.4]: https://github.com/kacao/hospitable/releases/tag/v0.5.4
