@@ -22,10 +22,6 @@ export interface PropertyListParams {
    * only the literals to avoid typos that fail open.
    *
    * Example: `include: 'user,listings,details'`
-   *
-   * ⚠️ `details` includes `wifiPassword` (sensitive credential) — the
-   * SDK's `sanitize()` helper will redact it in debug logs and thrown
-   * error bodies, but avoid logging raw `Property` objects.
    */
   include?: string
 }

@@ -136,11 +136,11 @@ export interface PropertyListing {
  * in Hospitable to answer common guest questions and feed automated
  * responses.
  *
- * ⚠️ **`wifiPassword` is a live credential** and gets automatically
- * redacted by the SDK's `sanitize()` helper in debug logs and in thrown
- * `ValidationError.fields` (any key matching `/password/i`). Don't log
- * raw Property objects containing `.details` — prefer `sanitize(p)` at
- * the boundary.
+ * **`wifiPassword` is NOT redacted** by `sanitize()`. It's semi-public by
+ * design — hosts share it with every guest — and agents fetching this
+ * field to include in a check-in message need to see the real value in
+ * debug output. The SDK's `SAFE_OVERRIDES` allowlist explicitly excludes
+ * `wifiPassword`/`wifi_password` from the broad `/password/i` match.
  */
 export interface PropertyDetails {
   /** Additional house rules beyond the structured `houseRules` object. */
@@ -159,7 +159,7 @@ export interface PropertyDetails {
   spaceOverview: string | null
   /** Wi-Fi network name (SSID). */
   wifiName: string | null
-  /** Wi-Fi password — **sensitive credential**, sanitized in logs. */
+  /** Wi-Fi password — passed through sanitize() unchanged (see SAFE_OVERRIDES). */
   wifiPassword: string | null
 }
 

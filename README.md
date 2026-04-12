@@ -165,13 +165,15 @@ const { data } = await client.properties.list({
 const p = await client.properties.get(propertyId, 'user,listings,details,bookings')
 ```
 
-⚠️ `details.wifiPassword` is a live credential. The SDK's `sanitize()`
-redacts any field matching `/password/i` in debug logs and thrown
-`ValidationError.fields`, but don't log raw `Property` objects to stdout.
-
 Unknown `include` values are silently ignored by the API (no error
 feedback for typos) — prefer `PropertyFilter.include('user', 'details')`
 for TypeScript-level narrowing.
+
+`details.wifiPassword` is deliberately **not** redacted by `sanitize()`.
+It's semi-public by design (hosts share it with every guest), and
+agent workflows typically read it to include in a check-in message.
+If you need it redacted in a specific context, filter at your log
+boundary rather than relying on SDK-level masking.
 
 ### `PropertySearchParams`
 
@@ -469,7 +471,7 @@ interface PropertyDetails {
   otherDetails: string | null
   spaceOverview: string | null
   wifiName: string | null
-  wifiPassword: string | null         // ⚠️ live credential — sanitized in logs/errors
+  wifiPassword: string | null         // passed through sanitize() unchanged
 }
 
 type PropertyBookings = unknown       // opaque; narrow at call site
@@ -903,6 +905,7 @@ Deliberately **not** masked (too broad to be individually identifying, and maski
 - `city`, `state`, `country`, `company`
 - `amount`, `paidOutAmount` (sensitive financial but not identity)
 - `platformId` — overloaded: on messages/reservations it's the public platform ID; on payouts it's a bank-transfer reference. Field-name-based redaction can't distinguish the two.
+- **`wifiPassword` / `wifi_password`** — semi-public by design (hosts share with every guest). Agent workflows read this to generate check-in messages, so redacting would force operators to bypass sanitization globally. Explicit `SAFE_OVERRIDES` allowlist in `src/utils/sanitize.ts` carves it out of the broad `/password/i` match. A bare `password` field (without the wifi prefix) is still redacted.
 
 ## Gotchas (read this)
 
