@@ -3,7 +3,7 @@ import { ReservationsResource } from '../resources/reservations'
 import type { HttpClient } from '../http/client'
 import type { ReservationList, Reservation, CreateReservationParams, UpdateReservationParams } from '../models/reservation'
 import type { EnrichmentField } from '../models/enrichment'
-import { ConfigurationError, NotFoundError, ValidationError } from '../errors'
+import { ConfigurationError, NotFoundError, RateLimitError, ValidationError } from '../errors'
 import { makeHttpClient } from './helpers'
 
 function makeReservation(overrides: Partial<Reservation> = {}): Reservation {
@@ -465,6 +465,18 @@ describe('ReservationsResource', () => {
       vi.mocked(http.post).mockRejectedValue(new ValidationError('Invalid'))
       await expect(resource.cancel('res-1', 'host')).rejects.toBeInstanceOf(ValidationError)
     })
+
+    it('propagates RateLimitError on 429', async () => {
+      vi.mocked(http.post).mockRejectedValue(new RateLimitError(30, 'req-1'))
+      const err = (await resource.cancel('res-1', 'host').catch((e) => e)) as RateLimitError
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect(err.retryAfter).toBe(30)
+    })
+
+    it('propagates NotFoundError on 404', async () => {
+      vi.mocked(http.post).mockRejectedValue(new NotFoundError('Not found'))
+      await expect(resource.cancel('missing', 'host')).rejects.toBeInstanceOf(NotFoundError)
+    })
   })
 
   describe('create()', () => {
@@ -491,13 +503,25 @@ describe('ReservationsResource', () => {
     it('normalizes statusHistory on the returned reservation', async () => {
       const res = makeReservation({
         statusHistory: [
-          { category: 'Accepted', status: 'accepted', changedAt: '2026-01-01T00:00:00+00:00' },
+          { category: 'Accepted', status: 'canceled', changedAt: '2026-01-01T00:00:00+00:00' },
         ],
       })
       vi.mocked(http.post).mockResolvedValue(res)
 
       const result = await resource.create(createParams)
-      expect(result.statusHistory[0]!.status).toBe('accepted')
+      expect(result.statusHistory[0]!.status).toBe('cancelled')
+    })
+
+    it('propagates ValidationError on 422', async () => {
+      vi.mocked(http.post).mockRejectedValue(new ValidationError('Invalid'))
+      await expect(resource.create(createParams)).rejects.toBeInstanceOf(ValidationError)
+    })
+
+    it('propagates RateLimitError on 429', async () => {
+      vi.mocked(http.post).mockRejectedValue(new RateLimitError(30, 'req-1'))
+      const err = (await resource.create(createParams).catch((e) => e)) as RateLimitError
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect(err.retryAfter).toBe(30)
     })
   })
 
@@ -535,6 +559,23 @@ describe('ReservationsResource', () => {
       const result = await resource.update('res-1', updateParams)
       expect(result.statusHistory[0]!.status).toBe('cancelled')
     })
+
+    it('propagates ValidationError on 422', async () => {
+      vi.mocked(http.put).mockRejectedValue(new ValidationError('Invalid'))
+      await expect(resource.update('res-1', updateParams)).rejects.toBeInstanceOf(ValidationError)
+    })
+
+    it('propagates RateLimitError on 429', async () => {
+      vi.mocked(http.put).mockRejectedValue(new RateLimitError(30, 'req-1'))
+      const err = (await resource.update('res-1', updateParams).catch((e) => e)) as RateLimitError
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect(err.retryAfter).toBe(30)
+    })
+
+    it('propagates NotFoundError on 404', async () => {
+      vi.mocked(http.put).mockRejectedValue(new NotFoundError('Not found'))
+      await expect(resource.update('missing', updateParams)).rejects.toBeInstanceOf(NotFoundError)
+    })
   })
 
   describe('listEnrichment()', () => {
@@ -556,6 +597,13 @@ describe('ReservationsResource', () => {
       vi.mocked(http.get).mockRejectedValue(new NotFoundError('Not found'))
       await expect(resource.listEnrichment('missing')).rejects.toBeInstanceOf(NotFoundError)
     })
+
+    it('propagates RateLimitError on 429', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(30, 'req-1'))
+      const err = (await resource.listEnrichment('res-1').catch((e) => e)) as RateLimitError
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect(err.retryAfter).toBe(30)
+    })
   })
 
   describe('getEnrichment()', () => {
@@ -571,6 +619,18 @@ describe('ReservationsResource', () => {
         '/v2/reservations/res-1/enrichment/arrival_time',
       )
       expect(result).toEqual(field)
+    })
+
+    it('propagates NotFoundError on 404', async () => {
+      vi.mocked(http.get).mockRejectedValue(new NotFoundError('Not found'))
+      await expect(resource.getEnrichment('missing', 'arrival_time')).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('propagates RateLimitError on 429', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(30, 'req-1'))
+      const err = (await resource.getEnrichment('res-1', 'arrival_time').catch((e) => e)) as RateLimitError
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect(err.retryAfter).toBe(30)
     })
   })
 
@@ -603,6 +663,18 @@ describe('ReservationsResource', () => {
         { value: null },
       )
       expect(result.value).toBeNull()
+    })
+
+    it('propagates ValidationError on 422', async () => {
+      vi.mocked(http.put).mockRejectedValue(new ValidationError('Invalid'))
+      await expect(resource.updateEnrichment('res-1', 'arrival_time', '5pm')).rejects.toBeInstanceOf(ValidationError)
+    })
+
+    it('propagates RateLimitError on 429', async () => {
+      vi.mocked(http.put).mockRejectedValue(new RateLimitError(30, 'req-1'))
+      const err = (await resource.updateEnrichment('res-1', 'arrival_time', '5pm').catch((e) => e)) as RateLimitError
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect(err.retryAfter).toBe(30)
     })
   })
 

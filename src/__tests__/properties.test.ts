@@ -3,7 +3,7 @@ import { PropertiesResource } from '../resources/properties'
 import type { HttpClient } from '../http/client'
 import type { Property, PropertyImage, PropertyIcalImport, PropertyTag } from '../models/property'
 import type { PaginatedResponse } from '../models/pagination'
-import { ConfigurationError, NotFoundError, ValidationError } from '../errors'
+import { ConfigurationError, NotFoundError, RateLimitError, ValidationError } from '../errors'
 import { makeHttpClient } from './helpers'
 
 const mockProperty: Property = {
@@ -426,6 +426,13 @@ describe('PropertiesResource', () => {
       expect(err.message).toContain('addTags')
       expect(err.message).toContain('1-10')
     })
+
+    it('propagates RateLimitError on 429', async () => {
+      vi.mocked(http.post).mockRejectedValue(new RateLimitError(30, 'req-1'))
+      const err = (await resource.addTags('prop-1', ['beach']).catch((e) => e)) as RateLimitError
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect(err.retryAfter).toBe(30)
+    })
   })
 
   describe('createQuote()', () => {
@@ -447,6 +454,26 @@ describe('PropertiesResource', () => {
         },
       )
       expect(result).toEqual({ total: 50000 })
+    })
+
+    it('propagates ValidationError on 422', async () => {
+      vi.mocked(http.post).mockRejectedValue(new ValidationError('Invalid'))
+      await expect(resource.createQuote('prop-1', {
+        checkinDate: '2026-06-01',
+        checkoutDate: '2026-06-05',
+        guests: { adults: 2 },
+      })).rejects.toBeInstanceOf(ValidationError)
+    })
+
+    it('propagates RateLimitError on 429', async () => {
+      vi.mocked(http.post).mockRejectedValue(new RateLimitError(30, 'req-1'))
+      const err = (await resource.createQuote('prop-1', {
+        checkinDate: '2026-06-01',
+        checkoutDate: '2026-06-05',
+        guests: { adults: 2 },
+      }).catch((e) => e)) as RateLimitError
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect(err.retryAfter).toBe(30)
     })
   })
 
@@ -496,6 +523,13 @@ describe('PropertiesResource', () => {
         resource.createIcalImport('prop-1', 'not-a-url'),
       ).rejects.toBeInstanceOf(ValidationError)
     })
+
+    it('propagates RateLimitError on 429', async () => {
+      vi.mocked(http.post).mockRejectedValue(new RateLimitError(30, 'req-1'))
+      const err = (await resource.createIcalImport('prop-1', 'https://example.com/feed.ics').catch((e) => e)) as RateLimitError
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect(err.retryAfter).toBe(30)
+    })
   })
 
   describe('updateIcalImport()', () => {
@@ -538,6 +572,20 @@ describe('PropertiesResource', () => {
       await expect(
         resource.updateIcalImport('prop-1', 'missing', { resync: true }),
       ).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('propagates RateLimitError on 429', async () => {
+      vi.mocked(http.put).mockRejectedValue(new RateLimitError(30, 'req-1'))
+      const err = (await resource.updateIcalImport('prop-1', 'ical-1', { resync: true }).catch((e) => e)) as RateLimitError
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect(err.retryAfter).toBe(30)
+    })
+
+    it('propagates ValidationError on 422', async () => {
+      vi.mocked(http.put).mockRejectedValue(new ValidationError('Invalid'))
+      await expect(
+        resource.updateIcalImport('prop-1', 'ical-1', { url: 'bad' }),
+      ).rejects.toBeInstanceOf(ValidationError)
     })
   })
 

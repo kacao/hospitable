@@ -197,6 +197,11 @@ export class PropertiesResource {
    * shape is typed as `unknown` — see {@link CreateQuoteParams} for the
    * input contract.
    *
+   * @returns The quote response from the API. Typed as `unknown` because
+   * the return shape couldn't be probed (account lacks "Direct" feature).
+   * Inspect the response object and narrow with a type guard at the call
+   * site. Expected to contain pricing breakdown fields.
+   *
    * @see POST https://public.api.hospitable.com/v2/properties/{id}/quote
    */
   async createQuote(uuid: string, params: CreateQuoteParams): Promise<unknown> {
@@ -231,7 +236,7 @@ export class PropertiesResource {
   async updateIcalImport(
     uuid: string,
     icalUuid: string,
-    options?: UpdateIcalImportOptions,
+    options: UpdateIcalImportOptions = {},
   ): Promise<PropertyIcalImport> {
     const response = await this.http.put<{ data: PropertyIcalImport }>(
       `/v2/properties/${encodeURIComponent(uuid)}/ical-imports/${encodeURIComponent(icalUuid)}`,

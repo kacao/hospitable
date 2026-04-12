@@ -145,6 +145,13 @@ describe('KnowledgeHubResource', () => {
       vi.mocked(http.post).mockRejectedValue(new ValidationError('Invalid', { content: ['required'] }))
       await expect(resource.createItem('prop-1', '')).rejects.toBeInstanceOf(ValidationError)
     })
+
+    it('propagates RateLimitError on 429', async () => {
+      vi.mocked(http.post).mockRejectedValue(new RateLimitError(30, 'req-1'))
+      const err = (await resource.createItem('prop-1', 'content').catch((e) => e)) as RateLimitError
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect(err.retryAfter).toBe(30)
+    })
   })
 
   describe('updateItem()', () => {
@@ -182,6 +189,23 @@ describe('KnowledgeHubResource', () => {
         { content: 'Content' },
       )
     })
+
+    it('propagates NotFoundError on 404', async () => {
+      vi.mocked(http.put).mockRejectedValue(new NotFoundError('Not found'))
+      await expect(resource.updateItem('prop-1', 999999, 'Content')).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('propagates ValidationError on 422', async () => {
+      vi.mocked(http.put).mockRejectedValue(new ValidationError('Invalid'))
+      await expect(resource.updateItem('prop-1', 1527918, '')).rejects.toBeInstanceOf(ValidationError)
+    })
+
+    it('propagates RateLimitError on 429', async () => {
+      vi.mocked(http.put).mockRejectedValue(new RateLimitError(30, 'req-1'))
+      const err = (await resource.updateItem('prop-1', 1527918, 'Content').catch((e) => e)) as RateLimitError
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect(err.retryAfter).toBe(30)
+    })
   })
 
   describe('deleteItem()', () => {
@@ -204,6 +228,13 @@ describe('KnowledgeHubResource', () => {
     it('propagates NotFoundError when item does not exist', async () => {
       vi.mocked(http.delete).mockRejectedValue(new NotFoundError('Not found'))
       await expect(resource.deleteItem('prop-1', 999999)).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('propagates RateLimitError on 429', async () => {
+      vi.mocked(http.delete).mockRejectedValue(new RateLimitError(30, 'req-1'))
+      const err = (await resource.deleteItem('prop-1', 1527918).catch((e) => e)) as RateLimitError
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect(err.retryAfter).toBe(30)
     })
   })
 
@@ -237,6 +268,13 @@ describe('KnowledgeHubResource', () => {
       expect(http.delete).toHaveBeenCalledWith(
         '/v2/properties/prop%2Fspecial/knowledge-hub/topics/42',
       )
+    })
+
+    it('propagates RateLimitError on 429', async () => {
+      vi.mocked(http.delete).mockRejectedValue(new RateLimitError(30, 'req-1'))
+      const err = (await resource.deleteTopic('prop-1', 961595).catch((e) => e)) as RateLimitError
+      expect(err).toBeInstanceOf(RateLimitError)
+      expect(err.retryAfter).toBe(30)
     })
   })
 })
