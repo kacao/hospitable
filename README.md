@@ -57,7 +57,7 @@ Every callable surface. Use this as a jump table.
 | Call | Signature | HTTP |
 | --- | --- | --- |
 | `client.properties.list` | `(params?: PropertyListParams) => Promise<PropertyList>` | `GET /v2/properties` |
-| `client.properties.get` | `(id: string) => Promise<Property>` | `GET /v2/properties/{id}` |
+| `client.properties.get` | `(id: string, include?: string) => Promise<Property>` | `GET /v2/properties/{id}` |
 | `client.properties.listTags` | `(id: string) => Promise<PropertyTag[]>` | `GET /v2/properties/{id}/tags` |
 | `client.properties.getImages` | `(id: string) => Promise<PropertyImage[]>` | `GET /v2/properties/{id}/images` |
 | `client.properties.search` | `(params: PropertySearchParams) => Promise<PropertyList>` | `GET /v2/properties/search` |
@@ -139,8 +139,39 @@ interface PropertyListParams {
   page?: number
   perPage?: number
   tags?: string[]
+  include?: string           // comma-separated — see PropertyIncludeField
 }
+
+type PropertyIncludeField = 'user' | 'listings' | 'details' | 'bookings'
 ```
+
+`include` values are verified against the live API:
+
+- **`user`** — populates `property.user` with `{id, email, name, profilePicture}`
+- **`listings`** — populates `property.listings: PropertyListing[]`, one entry per booking channel (airbnb, vrbo, direct, manual, gvr, booking_com…) with `platform`, `platformId`, `coHosts`, etc.
+- **`details`** — populates `property.details: PropertyDetails` with host-operational info: `wifiName`, `wifiPassword`, `houseManual`, `guestAccess`, `gettingAround`, `neighborhoodDescription`, `additionalRules`, `otherDetails`, `spaceOverview`
+- **`bookings`** — populates `property.bookings` (typed as `unknown` — opaque pricing/policy config; narrow at call site)
+
+`include` works on both `list()` and `get()`:
+
+```ts
+// List all properties with host + listings + operational details
+const { data } = await client.properties.list({
+  include: 'user,listings,details',
+  perPage: 100,
+})
+
+// Fetch one property with everything
+const p = await client.properties.get(propertyId, 'user,listings,details,bookings')
+```
+
+⚠️ `details.wifiPassword` is a live credential. The SDK's `sanitize()`
+redacts any field matching `/password/i` in debug logs and thrown
+`ValidationError.fields`, but don't log raw `Property` objects to stdout.
+
+Unknown `include` values are silently ignored by the API (no error
+feedback for typos) — prefer `PropertyFilter.include('user', 'details')`
+for TypeScript-level narrowing.
 
 ### `PropertySearchParams`
 
@@ -395,6 +426,55 @@ const thread = await client.messages.list(reservationId)
 const mySends = thread.messages.filter(m => m.source === 'public_api')
 ```
 
+### `Property` (when includes are requested)
+
+```ts
+interface Property {
+  // ... core fields (id, name, address, capacity, amenities, etc.)
+
+  // Include-gated fields, populated only when the matching `include=` value is passed:
+  user?: PropertyUser                 // include=user
+  listings?: PropertyListing[]        // include=listings
+  details?: PropertyDetails           // include=details
+  bookings?: PropertyBookings         // include=bookings
+}
+
+interface PropertyUser {
+  id: string
+  email: string
+  name: string
+  profilePicture: string | null
+}
+
+interface PropertyListing {
+  platform: string                    // 'airbnb' | 'vrbo' | 'direct' | 'manual' | ...
+  platformId: string
+  platformUserId: string | null
+  platformPicture: string | null
+  platformName: string | null
+  platformEmail: string | null
+  coHosts: Array<{
+    userId: string
+    name: string
+    channelName: string
+  }>
+}
+
+interface PropertyDetails {
+  additionalRules: string | null
+  gettingAround: string | null
+  guestAccess: string | null
+  houseManual: string | null
+  neighborhoodDescription: string | null
+  otherDetails: string | null
+  spaceOverview: string | null
+  wifiName: string | null
+  wifiPassword: string | null         // ⚠️ live credential — sanitized in logs/errors
+}
+
+type PropertyBookings = unknown       // opaque; narrow at call site
+```
+
 ### `User`
 
 ```ts
@@ -455,7 +535,7 @@ Immutable fluent builders. Terminal call: `.toParams()`.
 
 | Filter | Chainable methods |
 | --- | --- |
-| `PropertyFilter` | `.tags(string[])`, `.perPage(n)` |
+| `PropertyFilter` | `.tags(string[])`, `.include(...PropertyIncludeField)`, `.perPage(n)` |
 | `ReservationFilter` | `.properties(ids)` **required**, `.checkinAfter(date)`, `.checkinBefore(date)`, `.dateQuery('checkin'\|'checkout')`, `.lastMessageAt('YYYY-MM-DD HH:MM:SS')`, `.status(ReservationStatus \| ReservationStatus[])`, `.include(...ReservationIncludeField)`, `.perPage(n)` |
 | `InquiryFilter` | `.properties(ids)` **required**, `.include(...InquiryIncludeField)`, `.lastMessageAfter(datetime)`, `.page(n)`, `.perPage(n)` |
 
@@ -530,6 +610,39 @@ const { data } = await client.properties.search({
 ```ts
 const images = await client.properties.getImages('prop-uuid')
 // images[i].url is pre-signed S3 with ~1h expiry. Do not cache it.
+```
+
+### Fetch properties with host + operational details
+
+```ts
+// Single property with everything side-loaded
+const p = await client.properties.get(propertyId, 'user,listings,details,bookings')
+
+console.log(`Host: ${p.user?.name} <${p.user?.email}>`)
+console.log(`Platforms: ${p.listings?.map(l => l.platform).join(', ')}`)
+console.log(`Wifi: ${p.details?.wifiName}`)
+
+// All properties at once, just with host info
+const { data } = await client.properties.list({
+  include: 'user',
+  perPage: 100,
+})
+for (const prop of data) {
+  console.log(`${prop.name} is hosted by ${prop.user?.name}`)
+}
+```
+
+Combine with `PropertyFilter` for TypeScript-level typo protection:
+
+```ts
+import { PropertyFilter } from 'hospitable'
+
+const params = new PropertyFilter()
+  .include('user', 'listings', 'details')   // typed — 'bookngs' would fail at compile
+  .perPage(50)
+  .toParams()
+
+const { data } = await client.properties.list(params)
 ```
 
 ### Fetch an inquiry with its thread
@@ -803,7 +916,7 @@ Things that routinely trip up agents generating code against this SDK.
 6. **`getImages()` returns pre-signed S3 URLs with ~1h expiry.** The SDK does **not** cache this method for that reason. Do not persist the URL — re-fetch when you need the content.
 7. **Message attachments are also pre-signed S3 URLs with short expiry.** Same advice: don't cache. Re-fetch the message thread when you need the content.
 8. **`transactions` and `payouts` are UNBOUNDED by default.** Calling `.iter()` with no params streams the entire account history (hundreds to thousands of rows). **Always pass `startDate`/`endDate` or `properties`** — especially in agent-driven code paths, where a prompt-injected agent could exfil full financial history in one turn.
-9. **`user.get()` unwraps a `.data` envelope; other resource `.get()` methods don't.** This is an API-side inconsistency (Hospitable wraps `/v2/user` but not `/v2/properties/{id}`), not an SDK bug. The SDK handles the unwrap so callers get a bare `User`.
+9. **`user.get()` and `properties.get()` unwrap a `.data` envelope; other resource `.get()` methods don't.** The Hospitable API is inconsistent: `/v2/user` and `/v2/properties/{id}` wrap their responses in `{data: ...}` while `/v2/reservations/{id}` and `/v2/inquiries/{id}` don't. The SDK handles the unwrap so callers always get a bare resource object regardless of endpoint.
 10. **`source: 'public_api'` tags messages sent through this SDK.** Useful for audit: `thread.messages.filter(m => m.source === 'public_api')` returns your own agent's sends.
 11. **`inquiry.id === conversation_id`.** Pass it directly to `client.messages.list(inquiry.id)`. Do not look for a separate `conversationId` field on inquiries.
 12. **Inquiry → reservation handoff.** While a conversation is still an inquiry (`reservation_id === null`), use `sendForInquiry`. Once a reservation exists, switch to `send`. Using the wrong endpoint returns 410 or 422.
@@ -838,7 +951,9 @@ PayoutsResource
 // Property models
 Property, PropertyList, PropertyTag, PropertyImage, PropertySearchParams,
   PropertyAddress, PropertyCapacity, PropertyHouseRules,
-  PropertyRoomDetail, PropertyRoomBed, PropertyParentChild
+  PropertyRoomDetail, PropertyRoomBed, PropertyParentChild,
+  PropertyIncludeField, PropertyUser, PropertyListing,
+  PropertyListingCoHost, PropertyDetails, PropertyBookings
 
 // Reservation models
 Reservation, ReservationList, ReservationListParams,

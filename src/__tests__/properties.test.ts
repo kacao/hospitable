@@ -67,11 +67,46 @@ describe('PropertiesResource', () => {
     expect(http.get).toHaveBeenCalledWith('/v2/properties', { perPage: 10 })
   })
 
-  it('get(id) calls GET /v2/properties/{id}', async () => {
-    vi.mocked(http.get).mockResolvedValue(mockProperty)
+  it('get(id) calls GET /v2/properties/{id} and unwraps the .data envelope', async () => {
+    // The single-property endpoint wraps in { data: Property } — see
+    // resource JSDoc. This test asserts the unwrap.
+    vi.mocked(http.get).mockResolvedValue({ data: mockProperty })
     const result = await resource.get('prop-1')
-    expect(http.get).toHaveBeenCalledWith('/v2/properties/prop-1')
+    expect(http.get).toHaveBeenCalledWith('/v2/properties/prop-1', undefined)
     expect(result).toEqual(mockProperty)
+  })
+
+  it('get(id, include) forwards include as a query param', async () => {
+    vi.mocked(http.get).mockResolvedValue({ data: mockProperty })
+    await resource.get('prop-1', 'user,listings,details,bookings')
+    expect(http.get).toHaveBeenCalledWith('/v2/properties/prop-1', {
+      include: 'user,listings,details,bookings',
+    })
+  })
+
+  it('list({ include }) forwards include as a query param', async () => {
+    vi.mocked(http.get).mockResolvedValue(mockPropertyList)
+    await resource.list({ include: 'user,listings' })
+    expect(http.get).toHaveBeenCalledWith('/v2/properties', {
+      include: 'user,listings',
+    })
+  })
+
+  it('get() caches separately when include differs', async () => {
+    // Regression guard: the cache key must include `include` so that
+    // `get(id)` and `get(id, 'user')` don't collide. Without this, the
+    // second call would return the first (unincluded) cached result.
+    const http2 = makeHttpClient()
+    const cachedResource = new PropertiesResource(http2, {
+      enabled: true,
+      ttl: 60_000,
+    })
+    vi.mocked(http2.get).mockResolvedValue({ data: mockProperty })
+
+    await cachedResource.get('prop-1')
+    await cachedResource.get('prop-1', 'user')
+
+    expect(http2.get).toHaveBeenCalledTimes(2)
   })
 
   it('listTags(id) calls GET /v2/properties/{id}/tags and returns .data array', async () => {
@@ -144,6 +179,117 @@ describe('PropertiesResource', () => {
         pets: 1,
       }),
     )
+  })
+
+  describe('include shapes', () => {
+    it('deserializes include=user into a nested PropertyUser object', async () => {
+      const withUser = {
+        ...mockProperty,
+        user: {
+          id: 'user-1',
+          email: 'host@example.com',
+          name: 'Host Name',
+          profilePicture: 'https://example.com/pic.jpg',
+        },
+      }
+      vi.mocked(http.get).mockResolvedValue({ data: withUser })
+      const result = await resource.get('prop-1', 'user')
+      expect(result.user).toBeDefined()
+      expect(result.user!.email).toBe('host@example.com')
+      expect(result.user!.name).toBe('Host Name')
+    })
+
+    it('deserializes include=listings into a PropertyListing array', async () => {
+      const withListings = {
+        ...mockProperty,
+        listings: [
+          {
+            platform: 'airbnb',
+            platformId: '1146437593562579512',
+            platformUserId: '444499287',
+            platformPicture: 'https://a0.muscache.com/profile.jpg',
+            platformName: 'Hummingbird Cottages',
+            platformEmail: null,
+            coHosts: [
+              { userId: '51018147', name: 'Nancy', channelName: 'Nancy' },
+            ],
+          },
+        ],
+      }
+      vi.mocked(http.get).mockResolvedValue({ data: withListings })
+      const result = await resource.get('prop-1', 'listings')
+      expect(result.listings).toHaveLength(1)
+      expect(result.listings![0]!.platform).toBe('airbnb')
+      expect(result.listings![0]!.coHosts[0]!.name).toBe('Nancy')
+    })
+
+    it('deserializes include=details with wifi + house manual', async () => {
+      const withDetails = {
+        ...mockProperty,
+        details: {
+          additionalRules: 'Quiet hours 10pm-7am',
+          gettingAround: '5 min walk to downtown',
+          guestAccess: 'Keypad lock',
+          houseManual: null,
+          neighborhoodDescription: 'Quiet residential area',
+          otherDetails: null,
+          spaceOverview: 'Cozy cottage',
+          wifiName: 'Hummingbird_5G',
+          wifiPassword: 'supersecret123',
+        },
+      }
+      vi.mocked(http.get).mockResolvedValue({ data: withDetails })
+      const result = await resource.get('prop-1', 'details')
+      expect(result.details).toBeDefined()
+      expect(result.details!.wifiName).toBe('Hummingbird_5G')
+      // Raw value preserved — sanitization happens at log/error time, not
+      // on the API response object itself.
+      expect(result.details!.wifiPassword).toBe('supersecret123')
+    })
+
+    it('deserializes include=bookings as opaque (unknown)', async () => {
+      const withBookings = {
+        ...mockProperty,
+        bookings: {
+          bookingPolicies: { minStay: 2 },
+          fees: [],
+          discounts: [],
+        },
+      }
+      vi.mocked(http.get).mockResolvedValue({ data: withBookings })
+      const result = await resource.get('prop-1', 'bookings')
+      // bookings is typed as unknown — narrow at the call site
+      expect(result.bookings).toBeDefined()
+      const b = result.bookings as { fees: unknown[]; discounts: unknown[] }
+      expect(b.fees).toEqual([])
+      expect(b.discounts).toEqual([])
+    })
+
+    it('handles the combined include=user,listings,details,bookings', async () => {
+      const combined = {
+        ...mockProperty,
+        user: { id: 'u1', email: 'a@b.com', name: 'A', profilePicture: null },
+        listings: [],
+        details: {
+          additionalRules: null,
+          gettingAround: null,
+          guestAccess: null,
+          houseManual: null,
+          neighborhoodDescription: null,
+          otherDetails: null,
+          spaceOverview: null,
+          wifiName: null,
+          wifiPassword: null,
+        },
+        bookings: {},
+      }
+      vi.mocked(http.get).mockResolvedValue({ data: combined })
+      const result = await resource.get('prop-1', 'user,listings,details,bookings')
+      expect(result.user).toBeDefined()
+      expect(result.listings).toBeDefined()
+      expect(result.details).toBeDefined()
+      expect(result.bookings).toBeDefined()
+    })
   })
 
   it('iter() yields items across 2 pages', async () => {

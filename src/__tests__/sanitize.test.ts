@@ -183,6 +183,39 @@ describe('sanitize', () => {
       })
     })
 
+    it('masks wifiPassword inside a Property details object', () => {
+      // Regression guard for include=details: the `details` object
+      // returned by /v2/properties with include=details contains a live
+      // credential (wifiPassword). The existing SENSITIVE_PATTERN
+      // matches /password/i, so both camelCase and snake_case variants
+      // should be redacted by field-name match.
+      const property = {
+        id: 'prop-1',
+        name: 'Beach House',
+        details: {
+          wifiName: 'Beach-5G',
+          wifiPassword: 'supersecret123',
+          houseManual: 'Check in at 3pm',
+        },
+      }
+      const result = sanitize(property) as typeof property
+      expect(result.details.wifiPassword).toBe('***')
+      // wifiName is not sensitive — still visible
+      expect(result.details.wifiName).toBe('Beach-5G')
+      expect(result.details.houseManual).toBe('Check in at 3pm')
+      expect(result.id).toBe('prop-1')
+    })
+
+    it('masks snake_case wifi_password too', () => {
+      // Raw API shape before deepSnakeToCamel runs
+      const property = {
+        details: { wifi_password: 'raw-api-pw', wifi_name: 'Beach' },
+      }
+      const result = sanitize(property) as typeof property
+      expect(result.details.wifi_password).toBe('***')
+      expect(result.details.wifi_name).toBe('Beach')
+    })
+
     it('masks a full User response in one pass', () => {
       const user = {
         id: 'user-1',

@@ -73,6 +73,111 @@ export interface PropertyTag {
  */
 export type PropertyParentChild = unknown | null
 
+/**
+ * Include fields accepted by `GET /v2/properties` and `GET /v2/properties/{id}`.
+ *
+ * Empirically verified against the live API on 2026-04-11. Unknown
+ * includes are silently ignored by the server (return 200 with no extra
+ * fields) — passing an invalid value won't error.
+ *
+ * @see https://developer.hospitable.com/docs/public-api-docs/qc4x36uhxinx3-get-properties
+ */
+export type PropertyIncludeField = 'user' | 'listings' | 'details' | 'bookings'
+
+/**
+ * Host/account info returned when `include=user` is requested on a
+ * property. Same shape as the nested `user` on a reservation — minimal
+ * identity (no billing, no business profile). For the full profile call
+ * `client.user.get()` separately.
+ */
+export interface PropertyUser {
+  id: string
+  email: string
+  name: string
+  profilePicture: string | null
+}
+
+/**
+ * Co-host entry on a property listing — one of potentially multiple
+ * people with admin access to a single channel. Empty array for listings
+ * with no co-hosts.
+ */
+export interface PropertyListingCoHost {
+  userId: string
+  name: string
+  channelName: string
+}
+
+/**
+ * A single platform listing for a property — one per booking channel
+ * (airbnb, vrbo, booking_com, direct, manual, gvr, etc.). Returned as an
+ * array when `include=listings` is requested.
+ */
+export interface PropertyListing {
+  /** Booking platform, e.g. `'airbnb'`, `'vrbo'`, `'direct'`. */
+  platform: string
+  /** Platform's listing id for this property on this channel. */
+  platformId: string
+  /** Platform's user id for the host on this listing. */
+  platformUserId: string | null
+  /** Host's profile picture URL on the platform, if any. */
+  platformPicture: string | null
+  /** Display name on the platform, if any. */
+  platformName: string | null
+  /** Host email on the platform, if any. */
+  platformEmail: string | null
+  /** Co-hosts with access to this listing. */
+  coHosts: PropertyListingCoHost[]
+}
+
+/**
+ * Host-operational details about a property — returned when
+ * `include=details` is requested. These are the fields the host populates
+ * in Hospitable to answer common guest questions and feed automated
+ * responses.
+ *
+ * ⚠️ **`wifiPassword` is a live credential** and gets automatically
+ * redacted by the SDK's `sanitize()` helper in debug logs and in thrown
+ * `ValidationError.fields` (any key matching `/password/i`). Don't log
+ * raw Property objects containing `.details` — prefer `sanitize(p)` at
+ * the boundary.
+ */
+export interface PropertyDetails {
+  /** Additional house rules beyond the structured `houseRules` object. */
+  additionalRules: string | null
+  /** Directions and transit info. */
+  gettingAround: string | null
+  /** How guests get in (lockbox, keypad, greeter, etc.). */
+  guestAccess: string | null
+  /** House manual / operations guide. */
+  houseManual: string | null
+  /** Neighborhood / area description. */
+  neighborhoodDescription: string | null
+  /** Free-form "other details" field. */
+  otherDetails: string | null
+  /** Short overview of the space. */
+  spaceOverview: string | null
+  /** Wi-Fi network name (SSID). */
+  wifiName: string | null
+  /** Wi-Fi password — **sensitive credential**, sanitized in logs. */
+  wifiPassword: string | null
+}
+
+/**
+ * Booking configuration returned when `include=bookings` is requested —
+ * pricing policies, fees, discounts, and occupancy rules for the
+ * property.
+ *
+ * Shape is deliberately opaque (`unknown`) because it's a large and
+ * loosely-structured configuration object that varies significantly by
+ * platform and account type. Narrow with a type guard at the call site
+ * if you need to read specific fields. Observed top-level keys include:
+ * `bookingPolicies`, `discounts`, `fees`, `listingMarkups`,
+ * `occupancyBasedRules`, `securityDepositCollector`, `securityDeposits`,
+ * `siteUrls`.
+ */
+export type PropertyBookings = unknown
+
 export interface Property {
   id: string
   name: string
@@ -104,6 +209,19 @@ export interface Property {
   calendarRestricted: boolean
   /** Parent/child linkage for multi-unit listings. `null` for standalone. */
   parentChild: PropertyParentChild
+
+  // Include-gated fields. Populated only when the corresponding value is
+  // passed to `include=` on list() or get(). Unknown includes are
+  // silently ignored by the API — pass only {@link PropertyIncludeField}
+  // literals to avoid typos that fail open.
+  /** Populated when `include=user` is requested. */
+  user?: PropertyUser
+  /** Populated when `include=listings` is requested — one entry per channel. */
+  listings?: PropertyListing[]
+  /** Populated when `include=details` is requested. Contains `wifiPassword`. */
+  details?: PropertyDetails
+  /** Populated when `include=bookings` is requested. Opaque — narrow at use site. */
+  bookings?: PropertyBookings
 }
 
 export type PropertyList = import('./pagination').PaginatedResponse<Property>

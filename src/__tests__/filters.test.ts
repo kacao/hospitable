@@ -145,6 +145,39 @@ describe('PropertyFilter', () => {
     expect(params).toEqual({ perPage: 50 })
   })
 
+  it('.include joins fields as comma-separated string', () => {
+    const params = new PropertyFilter().include('user', 'listings').toParams()
+    expect(params.include).toBe('user,listings')
+  })
+
+  it('.include accepts all four valid PropertyIncludeField values', () => {
+    const params = new PropertyFilter()
+      .include('user', 'listings', 'details', 'bookings')
+      .toParams()
+    expect(params.include).toBe('user,listings,details,bookings')
+  })
+
+  it('.include() is immutable', () => {
+    const original = new PropertyFilter()
+    const next = original.include('user')
+    expect(next).not.toBe(original)
+    expect(original.toParams().include).toBeUndefined()
+    expect(next.toParams().include).toBe('user')
+  })
+
+  it('chains tags + include + perPage', () => {
+    const params = new PropertyFilter()
+      .tags(['Anaheim'])
+      .include('user', 'details')
+      .perPage(50)
+      .toParams()
+    expect(params).toEqual({
+      tags: ['Anaheim'],
+      include: 'user,details',
+      perPage: 50,
+    })
+  })
+
   it('is immutable — each method returns new instance, original unchanged', () => {
     const original = new PropertyFilter()
     const next = original.tags(['t1'])

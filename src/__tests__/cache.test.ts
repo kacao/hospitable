@@ -203,7 +203,7 @@ describe('PropertiesResource caching', () => {
   it('caches get() by id', async () => {
     const http = makeHttpClient()
     const resource = new PropertiesResource(http, { enabled: true, ttl: 60_000 })
-    vi.mocked(http.get).mockResolvedValue(mockProperty)
+    vi.mocked(http.get).mockResolvedValue({ data: mockProperty })
 
     await resource.get('prop-1')
     await resource.get('prop-1')
@@ -226,7 +226,7 @@ describe('PropertiesResource caching', () => {
     vi.useFakeTimers()
     const http = makeHttpClient()
     const resource = new PropertiesResource(http, { enabled: true, ttl: 100 })
-    vi.mocked(http.get).mockResolvedValue(mockProperty)
+    vi.mocked(http.get).mockResolvedValue({ data: mockProperty })
 
     await resource.get('prop-1')
     vi.advanceTimersByTime(101)
@@ -238,7 +238,7 @@ describe('PropertiesResource caching', () => {
   it('clearCache() forces fresh fetch', async () => {
     const http = makeHttpClient()
     const resource = new PropertiesResource(http, { enabled: true, ttl: 60_000 })
-    vi.mocked(http.get).mockResolvedValue(mockProperty)
+    vi.mocked(http.get).mockResolvedValue({ data: mockProperty })
 
     await resource.get('prop-1')
     resource.clearCache()
@@ -251,7 +251,7 @@ describe('PropertiesResource caching', () => {
     vi.useFakeTimers()
     const http = makeHttpClient()
     const resource = new PropertiesResource(http, { enabled: true })
-    vi.mocked(http.get).mockResolvedValue(mockProperty)
+    vi.mocked(http.get).mockResolvedValue({ data: mockProperty })
 
     await resource.get('prop-1')
     vi.advanceTimersByTime(86_399_999)

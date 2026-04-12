@@ -15,6 +15,19 @@ export interface PropertyListParams {
   page?: number
   perPage?: number
   tags?: string[]
+  /**
+   * Comma-separated include fields. Valid values are members of
+   * {@link PropertyIncludeField}: `'user'`, `'listings'`, `'details'`,
+   * `'bookings'`. Unknown values are silently ignored by the API — pass
+   * only the literals to avoid typos that fail open.
+   *
+   * Example: `include: 'user,listings,details'`
+   *
+   * ⚠️ `details` includes `wifiPassword` (sensitive credential) — the
+   * SDK's `sanitize()` helper will redact it in debug logs and thrown
+   * error bodies, but avoid logging raw `Property` objects.
+   */
+  include?: string
 }
 
 /**
@@ -62,16 +75,29 @@ export class PropertiesResource {
   /**
    * Fetch a single property by UUID.
    *
+   * Pass `include` as a comma-separated list of {@link PropertyIncludeField}
+   * values — `'user'`, `'listings'`, `'details'`, `'bookings'` — to
+   * side-load related data onto the response.
+   *
+   * **Envelope quirk**: unlike the list endpoint, the single-property
+   * response is wrapped in `{data: Property}`. The SDK unwraps it so
+   * callers always receive a bare {@link Property}. This is an API-side
+   * inconsistency (also present on `/v2/user`), not an SDK bug.
+   *
    * @see GET https://public.api.hospitable.com/v2/properties/{id}
    * @throws {NotFoundError} on 404
    */
-  async get(id: string): Promise<Property> {
-    const key = cacheKey('properties:get', { id })
+  async get(id: string, include?: string): Promise<Property> {
+    const key = cacheKey('properties:get', { id, include })
     if (this.cache) {
       const cached = this.cache.get(key) as Property | undefined
       if (cached) return cached
     }
-    const result = await this.http.get<Property>(`/v2/properties/${encodeURIComponent(id)}`)
+    const response = await this.http.get<{ data: Property }>(
+      `/v2/properties/${encodeURIComponent(id)}`,
+      include ? { include } : undefined,
+    )
+    const result = response.data
     this.cache?.set(key, result)
     return result
   }
