@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 with the caveat that **while at 0.x, breaking changes land on the minor version**
 (standard npm semver for pre-1.0 libraries).
 
+## [0.5.2] — 2026-04-11
+
+### 📝 Changed
+
+- **`wifiPassword` is no longer redacted by `sanitize()`.** Reverses the
+  0.5.1 position. Rationale: Wi-Fi passwords are semi-public by design
+  (hosts share them with every guest), and agents fetching
+  `property.details.wifiPassword` to include in a check-in message need
+  to see the real value in debug output. Masking it was over-broad
+  collateral damage from the `/password/i` rule.
+  - New `SAFE_OVERRIDES` allowlist in `src/utils/sanitize.ts`
+    explicitly carves `wifiPassword` and `wifi_password` out of the
+    sensitive-pattern match. Checked before all three redaction
+    patterns.
+  - Bare `password` fields (and anything matching `/password/i` that
+    isn't explicitly allowlisted) are still redacted — defense-in-depth
+    is preserved for hypothetical future endpoints.
+  - README, `PropertyDetails` JSDoc, and `PropertyListParams.include`
+    JSDoc updated to reflect the revised policy.
+  - Sanitize tests flipped: `wifiPassword`/`wifi_password` now assert
+    pass-through; a new test guards the bare-`password` case to ensure
+    the carve-out didn't accidentally widen.
+
+### 🧪 Tests
+
+- **435 tests** (up from 434 in 0.5.1). Net +1:
+  - 2 existing `wifiPassword` tests flipped from `.toBe('***')` to
+    `.toBe('supersecret123')` (no net change in count)
+  - 1 new regression guard for bare-`password` redaction
+
+---
+
 ## [0.5.1] — 2026-04-11
 
 ### ✨ Added
@@ -174,3 +206,4 @@ any existing ADRs in `/decisions/` for architectural decisions.
 
 [0.5.0]: https://github.com/kacao/hospitable/releases/tag/v0.5.0
 [0.5.1]: https://github.com/kacao/hospitable/releases/tag/v0.5.1
+[0.5.2]: https://github.com/kacao/hospitable/releases/tag/v0.5.2
