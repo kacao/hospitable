@@ -75,6 +75,16 @@ describe('ReservationFilter', () => {
     expect(params.include).toBe('guest,properties,review')
   })
 
+  it('.include accepts all seven ReservationIncludeField values', () => {
+    // Regression guard: if any literal is removed from the union,
+    // this test breaks at compile time. The array annotation forces
+    // the compiler to verify each literal is still in the union.
+    const params = base()
+      .include('guest', 'user', 'financials', 'listings', 'properties', 'review', 'smartlock_code')
+      .toParams()
+    expect(params.include).toBe('guest,user,financials,listings,properties,review,smartlock_code')
+  })
+
   it('chaining sets all params', () => {
     const params = base()
       .checkinAfter('2026-01-01')
@@ -216,6 +226,18 @@ describe('InquiryFilter', () => {
       lastMessageAt: '2026-01-01T00:00:00Z',
       perPage: 50,
     })
+  })
+
+  it('.include accepts all five InquiryIncludeField values valid on list()', () => {
+    // Note: `messages` is excluded here because the API rejects
+    // include=messages on the /v2/inquiries list endpoint with
+    // "You cannot include messages when fetching all inquiries".
+    // The messages include is only usable on `client.inquiries.get()`.
+    const params = new InquiryFilter()
+      .properties(['prop-1'])
+      .include('guest', 'user', 'financials', 'listings', 'properties')
+      .toParams()
+    expect(params.include).toBe('guest,user,financials,listings,properties')
   })
 
   it('is immutable — each method returns new instance, original unchanged', () => {

@@ -79,6 +79,20 @@ export interface ReviewReservation {
 }
 
 /**
+ * Minimal property info returned when `include=property` is passed.
+ * Contains just enough to label the review without a second API call —
+ * useful for building "recent reviews across all properties" feeds.
+ * For the full property, call `client.properties.get(review.property.id)`.
+ */
+export interface ReviewProperty {
+  id: string
+  /** Internal property name (host-facing). */
+  name: string
+  /** Public-facing listing name shown to guests on booking platforms. */
+  publicName: string
+}
+
+/**
  * A guest review from a booking platform.
  *
  * @see https://developer.hospitable.com/docs/public-api-docs/v8ue8kuzpfgvj-reviews-resource
@@ -102,6 +116,8 @@ export interface Review {
   guest?: ReviewGuest
   /** Populated only when `include=reservation` is requested. */
   reservation?: ReviewReservation
+  /** Populated only when `include=property` is requested. */
+  property?: ReviewProperty
 }
 
 export type ReviewList = import('./pagination').PaginatedResponse<Review>
@@ -109,9 +125,12 @@ export type ReviewList = import('./pagination').PaginatedResponse<Review>
 /**
  * Include fields accepted by the reviews list endpoint.
  *
- * Empirically verified against the live API on 2026-04-11.
+ * Empirically verified against the live API on 2026-04-11. Note that
+ * `reservation` is **singular** — passing `'reservations'` (plural)
+ * returns HTTP 200 with no side-loaded field (silent ignore). Same for
+ * `property` vs `'properties'` — use the singular form.
  */
-export type ReviewIncludeField = 'guest' | 'reservation'
+export type ReviewIncludeField = 'guest' | 'reservation' | 'property'
 
 export interface ReviewListParams {
   /** Filter by whether the host has responded. Omit to include both. */

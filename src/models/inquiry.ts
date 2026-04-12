@@ -76,6 +76,7 @@ export type InquiryList = PaginatedResponse<Inquiry>
 export type InquiryIncludeField =
   | 'financials'
   | 'guest'
+  | 'user'
   | 'properties'
   | 'listings'
   | 'messages'

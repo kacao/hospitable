@@ -217,13 +217,14 @@ type ReservationStatus =
 type ReservationDateQuery = 'checkin' | 'checkout'
 
 type ReservationIncludeField =
-  | 'guest' | 'user' | 'financials' | 'listings' | 'properties' | 'review'
+  | 'guest' | 'user' | 'financials' | 'listings' | 'properties' | 'review' | 'smartlock_code'
 ```
 
 - **`properties` is required.** The SDK throws `ConfigurationError` locally before the HTTP call if it's missing or an empty array — see [Gotchas](#gotchas-read-this).
 - **`dateQuery`** picks which date field `startDate`/`endDate` filter against. Defaults to `'checkin'` server-side. Use `'checkout'` for "guests still in-house" or "departing in this window" queries. Only `'checkin'` and `'checkout'` are valid — anything else returns `400`.
 - **`lastMessageAt` format quirk**: the API expects `YYYY-MM-DD HH:MM:SS` (space-separated, no timezone), **not ISO 8601**.
 - **`include=review`** fetches the review associated with each reservation alongside the reservation itself — useful for batch review-status audits.
+- **`include=smartlock_code`** side-loads the property's smart-lock access code for this reservation as `reservation.smartlockCode` (string, typically a 4-digit numeric code, or `null` for cancelled/far-future reservations). Not redacted by `sanitize()` — agents need to include the code in guest check-in messages, same semantic as `wifiPassword` on a property's `details`.
 - `status` may be passed as a string or array; the SDK always serializes as an array.
 
 ### `TransactionListParams` / `PayoutListParams`
@@ -260,27 +261,35 @@ interface InquiryListParams {
 }
 
 type InquiryIncludeField =
-  | 'financials' | 'guest' | 'properties' | 'listings' | 'messages'
+  | 'financials' | 'guest' | 'user' | 'properties' | 'listings' | 'messages'
 ```
 
-Valid `include` values on **list**: `financials`, `guest`, `properties`, `listings`. The `messages` include is **only** supported on `client.inquiries.get`.
+Valid `include` values on **list**: `financials`, `guest`, `user`, `properties`, `listings`. The `messages` include is **only** supported on `client.inquiries.get` — the list endpoint rejects it with `400 "You cannot include messages when fetching all inquiries"`.
 
 ### `ReviewListParams`
 
 ```ts
 interface ReviewListParams {
   responded?: boolean
-  include?: string          // 'guest' | 'reservation' | 'guest,reservation'
+  include?: string          // e.g. 'guest,reservation,property'
   page?: number
   perPage?: number
 }
 
-type ReviewIncludeField = 'guest' | 'reservation'
+type ReviewIncludeField = 'guest' | 'reservation' | 'property'
 ```
 
-Pass `include: 'guest,reservation'` to side-load the minimal guest info
-(first/last name, language) and reservation summary (id, code, checkIn,
-checkOut) onto each review — saves a second API call per review.
+Pass `include: 'guest,reservation,property'` to side-load:
+
+- **`review.guest`** — first/last name, language (minimal — no PII beyond that)
+- **`review.reservation`** — `{id, code, checkIn, checkOut}` summary for cross-reference
+- **`review.property`** — `{id, name, publicName}` summary, useful for building cross-property review feeds
+
+⚠️ `reservation` and `property` are **singular** include values. Passing
+`'reservations'` or `'properties'` (plural) returns HTTP 200 with the
+field silently missing — the API silent-ignores unknown includes, so
+use the `ReviewIncludeField` literal union via the filter builder for
+compile-time protection.
 
 Unknown `include` values are silently ignored by the API — don't rely
 on error feedback for typos.
@@ -334,6 +343,7 @@ interface Reservation {
   properties?: unknown[]     // only when include=properties
   listings?: unknown[]       // only when include=listings
   review?: unknown | null    // only when include=review
+  smartlockCode?: string | null   // only when include=smartlock_code; 4-digit numeric code or null
 
   notes: string | null
   conversationId: string
@@ -382,6 +392,11 @@ interface Review {
     code: string
     checkIn: string
     checkOut: string
+  }
+  property?: {                        // only when include=property
+    id: string
+    name: string                      // host-facing internal name
+    publicName: string                // public-facing listing name
   }
 }
 ```
@@ -594,6 +609,34 @@ for (const r of inHouse) {
   console.log(`${r.guest?.firstName} ${r.guest?.lastName} — checks out ${r.departureDate.slice(0,10)}`)
 }
 ```
+
+### Generate a check-in message with wifi + door code
+
+```ts
+// Fetch both the property (for wifi) and the reservation (for smart lock code)
+const { data: reservations } = await client.reservations.list({
+  properties: [propertyId],
+  status: 'accepted',
+  startDate: today,
+  include: 'guest,smartlock_code',
+  perPage: 1,
+})
+const r = reservations[0]!
+
+const property = await client.properties.get(propertyId, 'details')
+
+const message = [
+  `Hi ${r.guest?.firstName}! Welcome to your stay.`,
+  `Wifi: ${property.details?.wifiName} / ${property.details?.wifiPassword}`,
+  `Door code: ${r.smartlockCode ?? '(will send closer to arrival)'}`,
+].join('\n')
+
+await client.messages.send(r.id, message)
+```
+
+Neither `wifiPassword` nor `smartlockCode` is redacted by the SDK's
+`sanitize()` helper — both are shareable credentials that agents
+legitimately need in debug output. See [Gotchas](#gotchas-read-this).
 
 ### Check a property's availability
 
@@ -906,6 +949,7 @@ Deliberately **not** masked (too broad to be individually identifying, and maski
 - `amount`, `paidOutAmount` (sensitive financial but not identity)
 - `platformId` — overloaded: on messages/reservations it's the public platform ID; on payouts it's a bank-transfer reference. Field-name-based redaction can't distinguish the two.
 - **`wifiPassword` / `wifi_password`** — semi-public by design (hosts share with every guest). Agent workflows read this to generate check-in messages, so redacting would force operators to bypass sanitization globally. Explicit `SAFE_OVERRIDES` allowlist in `src/utils/sanitize.ts` carves it out of the broad `/password/i` match. A bare `password` field (without the wifi prefix) is still redacted.
+- **`smartlockCode` / `smartlock_code`** — same rationale as wifi. The smart-lock access code is shared with the guest for their stay; agents need the real value when composing check-in messages. The field name doesn't match any sanitize pattern naturally, but a test pins this behavior so future pattern additions don't accidentally capture it.
 
 ## Gotchas (read this)
 
@@ -981,7 +1025,7 @@ Message, MessageReceipt, MessageThread, MessageTemplate,
 Review, ReviewList, ReviewListParams, ReviewIncludeField,
   ReviewPublic, ReviewPrivate, ReviewDetailedRating,
   ReviewDetailedRatingType, ReviewGuest, ReviewReservation,
-  ReviewRespondBody
+  ReviewProperty, ReviewRespondBody
 
 // Calendar models
 CalendarData, CalendarDay, CalendarDayPrice, CalendarDayStatus,

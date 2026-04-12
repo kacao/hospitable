@@ -51,6 +51,7 @@ export type ReservationIncludeField =
   | 'listings'
   | 'properties'
   | 'review'
+  | 'smartlock_code'
 
 /**
  * Selector for which date field `startDate`/`endDate` filter against.
@@ -189,6 +190,23 @@ export interface Reservation {
    * reservation has no review yet (e.g. still in progress, or cancelled).
    */
   review?: unknown | null
+  /**
+   * Smart-lock access code for the property during this reservation,
+   * typically a 4-digit numeric string. Populated only when
+   * `include=smartlock_code` is requested. `null` when the property has
+   * no smart lock configured, or the reservation doesn't have a code
+   * assigned yet (e.g. cancelled, far-future, not-accepted).
+   *
+   * This field is **not** redacted by `sanitize()` — like `wifiPassword`
+   * on a property, it's a shareable credential an agent needs to include
+   * in guest check-in messages. Don't log raw Reservation objects to
+   * stdout in contexts where bystanders might see them.
+   *
+   * Wire format: the API serializes this as `smartlock_code`
+   * (snake_case); the SDK's `deepSnakeToCamel` converts it to
+   * `smartlockCode` on the TypeScript side.
+   */
+  smartlockCode?: string | null
 
   notes: string | null
   conversationId: string

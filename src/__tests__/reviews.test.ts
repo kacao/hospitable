@@ -67,6 +67,38 @@ describe('ReviewsResource', () => {
       expect(http.get).toHaveBeenCalledWith('/v2/properties/prop-1/reviews', { responded: false, include: 'guest' })
     })
 
+    it('passes include=guest,reservation,property through', async () => {
+      const list = makeList([])
+      vi.mocked(http.get).mockResolvedValue(list)
+
+      await resource.list('prop-1', { include: 'guest,reservation,property' })
+
+      expect(http.get).toHaveBeenCalledWith(
+        '/v2/properties/prop-1/reviews',
+        { include: 'guest,reservation,property' },
+      )
+    })
+
+    it('deserializes include=property into review.property', async () => {
+      // Regression guard for the include=property support added after
+      // empirical probe of the live API.
+      const review = makeReview({
+        property: {
+          id: 'prop-uuid-1',
+          name: 'Anaheim-D',
+          publicName: 'King Bed - Pool Front - 7 min to Disney',
+        },
+      })
+      vi.mocked(http.get).mockResolvedValue(makeList([review]))
+
+      const result = await resource.list('prop-1', { include: 'property' })
+
+      expect(result.data[0]!.property).toBeDefined()
+      expect(result.data[0]!.property!.id).toBe('prop-uuid-1')
+      expect(result.data[0]!.property!.name).toBe('Anaheim-D')
+      expect(result.data[0]!.property!.publicName).toContain('Disney')
+    })
+
     it('throws NotFoundError when the property does not exist', async () => {
       vi.mocked(http.get).mockRejectedValue(new NotFoundError('Property not found', 'req-1'))
 

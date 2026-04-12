@@ -319,6 +319,48 @@ describe('status array regression — integration', () => {
       expect(r2.data[0]!.statusHistory[0]!.status).toBe('cancelled')
     })
 
+    it('deserializes smartlock_code into camelCase smartlockCode', async () => {
+      // Regression guard: the snake_case `smartlock_code` field name
+      // from the API must be converted to `smartlockCode` on the
+      // TypeScript side via deepSnakeToCamel. Previously tests built
+      // camelCased factory objects which never exercised this path.
+      const apiResponse = {
+        data: [{
+          id: 'res-with-lock',
+          code: 'HMNPQQH5KK',
+          platform: 'airbnb',
+          platform_id: 'a1',
+          booking_date: '2026-01-01',
+          arrival_date: '2026-03-01',
+          departure_date: '2026-03-05',
+          check_in: '15:00',
+          check_out: '11:00',
+          nights: 4,
+          stay_type: 'guest',
+          owner_stay: null,
+          reservation_status: { current: { category: 'accepted', sub_category: null }, history: [] },
+          status: 'accepted',
+          status_history: [],
+          guests: { total: 1, adult_count: 1, child_count: 0, infant_count: 0, pet_count: 0 },
+          notes: null,
+          conversation_id: 'conv-1',
+          conversation_language: null,
+          last_message_at: null,
+          issue_alert: null,
+          smartlock_code: '9588',
+        }],
+        meta: { current_page: 1, last_page: 1, per_page: 1, total: 1 },
+        links: { first: null, last: null, prev: null, next: null },
+      }
+      captureFetch(200, apiResponse)
+      const client = new HospitableClient({ token: 'test' })
+      const result = await client.reservations.list({
+        properties: ['p'],
+        include: 'smartlock_code',
+      })
+      expect(result.data[0]!.smartlockCode).toBe('9588')
+    })
+
     it('deserializes reservationStatus nested object (new structured format)', async () => {
       const apiResponse = {
         data: [{

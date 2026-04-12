@@ -217,6 +217,29 @@ describe('sanitize', () => {
       expect(result.details.wifi_name).toBe('Beach')
     })
 
+    it('passes smartlockCode through unchanged', () => {
+      // Same rationale as wifiPassword: the smart-lock access code is
+      // a credential the agent needs to send to the guest. Agents
+      // fetching reservation.smartlockCode to generate a check-in
+      // message need to see the real value in debug output.
+      // smartlockCode doesn't match any sanitize pattern naturally,
+      // but this test pins the behavior so future pattern additions
+      // don't accidentally capture it.
+      const reservation = {
+        id: 'res-1',
+        code: 'HMNPQQH5KK',
+        smartlockCode: '9588',
+      }
+      const result = sanitize(reservation) as typeof reservation
+      expect(result.smartlockCode).toBe('9588')
+    })
+
+    it('passes snake_case smartlock_code through unchanged', () => {
+      const reservation = { smartlock_code: '1234' }
+      const result = sanitize(reservation) as typeof reservation
+      expect(result.smartlock_code).toBe('1234')
+    })
+
     it('still masks a bare "password" field (defense-in-depth retained)', () => {
       // The SAFE_OVERRIDES carve-out is scoped to wifiPassword
       // specifically. A future endpoint returning a raw `password`

@@ -190,6 +190,47 @@ describe('ReservationsResource', () => {
       expect(params.startDate).toBe('2026-01-01')
     })
 
+    it('smartlockCode field is populated when include=smartlock_code is requested', async () => {
+      // Regression guard: smartlock_code is an additive include added
+      // after empirical probe of the live API. Agents fetching this
+      // field typically use it to generate check-in messages with the
+      // door code — same use case as wifiPassword.
+      const list = makeList([
+        makeReservation({
+          id: 'res-with-code',
+          smartlockCode: '9588',
+        }),
+      ])
+      vi.mocked(http.get).mockResolvedValue(list)
+
+      const result = await resource.list({
+        properties: ['p'],
+        include: 'smartlock_code',
+      })
+
+      expect(result.data[0]!.smartlockCode).toBe('9588')
+      expect(http.get).toHaveBeenCalledWith(
+        '/v2/reservations',
+        expect.objectContaining({ include: 'smartlock_code' }),
+      )
+    })
+
+    it('smartlockCode is null when the reservation has no code assigned', async () => {
+      // Real-world case: the API returns null for cancelled,
+      // far-future, or not-accepted reservations.
+      const list = makeList([
+        makeReservation({ id: 'res-no-code', smartlockCode: null }),
+      ])
+      vi.mocked(http.get).mockResolvedValue(list)
+
+      const result = await resource.list({
+        properties: ['p'],
+        include: 'smartlock_code',
+      })
+
+      expect(result.data[0]!.smartlockCode).toBe(null)
+    })
+
     it('passes all params through normalization correctly', async () => {
       const list = makeList([])
       vi.mocked(http.get).mockResolvedValue(list)
