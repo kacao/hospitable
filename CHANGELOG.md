@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 with the caveat that **while at 0.x, breaking changes land on the minor version**
 (standard npm semver for pre-1.0 libraries).
 
+## [0.5.3] — 2026-04-11
+
+### ✨ Added
+
+Three `include` values were missing from the SDK that the live API
+actually supports. Added after an exhaustive probe of every plausible
+candidate against `/v2/reservations`, `/v2/inquiries`, and
+`/v2/properties/{id}/reviews`. All three are empirically verified.
+
+- **`reservations` now supports `include=smartlock_code`** —
+  side-loads the property's smart-lock access code for the reservation
+  as `reservation.smartlockCode: string | null` (typically a 4-digit
+  numeric code). Populated only on accepted reservations that have a
+  code assigned; `null` on cancelled/far-future/not-accepted. The
+  field is deliberately **not** redacted by `sanitize()` — same
+  rationale as `wifiPassword`: agents fetching this value are composing
+  a check-in message and need to see the real code. The
+  `smartlock_code` wire key converts to `smartlockCode` via
+  `deepSnakeToCamel` on the TypeScript side. New `ReservationIncludeField`
+  literal added for `PropertyFilter.include()`-style narrowing.
+
+- **`inquiries` now supports `include=user`** — the SDK's `Inquiry`
+  interface already declared `user?: InquiryUser` but the
+  `InquiryIncludeField` type union was missing the `'user'` literal,
+  so `client.inquiries.list({ include: 'user' })` worked at runtime
+  but `InquiryFilter.include('user')` failed at compile time. The
+  union is now in sync with the field, and both paths are usable.
+
+- **`reviews` now supports `include=property`** — side-loads
+  `review.property: ReviewProperty` with `{id, name, publicName}` for
+  cross-property review feeds and "recent reviews across all my
+  listings" displays. Useful when an agent wants to label a review
+  with its property without a second API call. New `ReviewProperty`
+  type exported from models.
+
+### 📝 Changed
+
+- **Review include JSDoc** now explicitly calls out the singular-vs-
+  plural trap: `reservation` and `property` are singular; passing
+  `'reservations'` or `'properties'` returns HTTP 200 with the field
+  silently missing. Use `ReviewIncludeField` literal narrowing via the
+  filter builder for compile-time protection.
+
+### 🧪 Tests
+
+- **444 tests** (up from 435 in 0.5.2). New coverage:
+  - `reservations.test.ts` → 2 tests for `smartlockCode` populated + null cases
+  - `status-array-regression.test.ts` → 1 test for `smartlock_code` → `smartlockCode` snake→camel round-trip via the real deserialization layer
+  - `filters.test.ts` → 2 tests covering full `ReservationIncludeField` (7 values) and `InquiryIncludeField` (5 list-safe values) literal unions as compile-time regression guards — removing a literal from either union breaks the test file at compile time
+  - `reviews.test.ts` → 2 tests for `include=property` deserialization and the `guest,reservation,property` combined pass-through
+  - `sanitize.test.ts` → 2 tests pinning `smartlockCode` / `smartlock_code` pass-through so future sanitize pattern additions can't accidentally capture them
+
+### 🔬 Method of discovery
+
+A new probe script `examples/probe-all-includes.ts` scans every
+plausible include value across reservations, inquiries, and reviews and
+reports which ones populate fields on the response (the API silently
+returns 200 for unknown includes, so field presence is the only
+signal). Committed to `examples/` as a reproducible audit tool for the
+next round of schema drift.
+
+---
+
 ## [0.5.2] — 2026-04-11
 
 ### 📝 Changed
@@ -207,3 +270,4 @@ any existing ADRs in `/decisions/` for architectural decisions.
 [0.5.0]: https://github.com/kacao/hospitable/releases/tag/v0.5.0
 [0.5.1]: https://github.com/kacao/hospitable/releases/tag/v0.5.1
 [0.5.2]: https://github.com/kacao/hospitable/releases/tag/v0.5.2
+[0.5.3]: https://github.com/kacao/hospitable/releases/tag/v0.5.3
