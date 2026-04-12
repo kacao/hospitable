@@ -1,6 +1,6 @@
 # hospitable
 
-TypeScript SDK for the [Hospitable Public API](https://developer.hospitable.com/docs/public-api-docs/). Typed resources for properties, reservations, inquiries, calendars, messages, reviews, user/billing, transactions, and payouts. OAuth2 + PAT auth, auto-retry on 429/5xx, async-iterator pagination, PII + business-identity masking.
+TypeScript SDK for the [Hospitable Public API](https://developer.hospitable.com/docs/public-api-docs/). Typed resources for properties, reservations, inquiries, calendars, messages, reviews, user/billing, transactions, payouts, and knowledge hub. OAuth2 + PAT auth, auto-retry on 429/5xx, async-iterator pagination, PII + business-identity masking.
 
 > **This README is written for AI coding agents.** It prioritizes exact type signatures, decision tables, and invariants over narrative. If a snippet disagrees with the source in `src/`, the source wins.
 >
@@ -88,8 +88,27 @@ Every callable surface. Use this as a jump table.
 | `client.user.get` | `() => Promise<User>` | `GET /v2/user` |
 | `client.transactions.list` | `(params?: TransactionListParams) => Promise<TransactionList>` | `GET /v2/transactions` *(financials:read scope)* |
 | `client.transactions.iter` | `(params?: Omit<TransactionListParams,'page'>) => AsyncGenerator<Transaction>` | (paginates) |
+| `client.reservations.cancel` | `(uuid: string, initiatedBy: 'host' \| 'guest') => Promise<Reservation>` | `POST /v2/reservations/{id}/cancel` |
+| `client.reservations.create` | `(params: CreateReservationParams) => Promise<Reservation>` | `POST /v2/reservations` |
+| `client.reservations.update` | `(uuid: string, params: UpdateReservationParams) => Promise<Reservation>` | `PUT /v2/reservations/{id}` |
+| `client.reservations.listEnrichment` | `(uuid: string) => Promise<EnrichmentField[]>` | `GET /v2/reservations/{id}/enrichment` |
+| `client.reservations.getEnrichment` | `(uuid: string, key: string) => Promise<EnrichmentField>` | `GET /v2/reservations/{id}/enrichment` |
+| `client.reservations.updateEnrichment` | `(uuid: string, key: string, value: string \| null) => Promise<EnrichmentField>` | `PUT /v2/reservations/{id}/enrichment` |
+| `client.properties.addTags` | `(uuid: string, tags: string[]) => Promise<void>` | `POST /v2/properties/{id}/tags` |
+| `client.properties.createQuote` | `(uuid: string, params: CreateQuoteParams) => Promise<unknown>` | `POST /v2/properties/{id}/quote` |
+| `client.properties.createIcalImport` | `(uuid: string, url: string, options?: CreateIcalImportOptions) => Promise<PropertyIcalImport>` | `POST /v2/properties/{id}/ical-imports` |
+| `client.properties.updateIcalImport` | `(uuid: string, icalUuid: string, options?: UpdateIcalImportOptions) => Promise<PropertyIcalImport>` | `PUT /v2/properties/{id}/ical-imports/{icalId}` |
+| `client.transactions.get` | `(uuid: string, include?: string) => Promise<Transaction>` | `GET /v2/transactions/{id}` *(financials:read scope)* |
+| `client.transactions.list` | `(params?: TransactionListParams) => Promise<TransactionList>` | `GET /v2/transactions` *(financials:read scope)* |
+| `client.transactions.iter` | `(params?: Omit<TransactionListParams,'page'>) => AsyncGenerator<Transaction>` | (paginates) |
+| `client.payouts.get` | `(uuid: string, include?: string) => Promise<Payout>` | `GET /v2/payouts/{id}` *(financials:read scope)* |
 | `client.payouts.list` | `(params?: PayoutListParams) => Promise<PayoutList>` | `GET /v2/payouts` *(financials:read scope)* |
 | `client.payouts.iter` | `(params?: Omit<PayoutListParams,'page'>) => AsyncGenerator<Payout>` | (paginates) |
+| `client.knowledgeHub.get` | `(propertyUuid: string) => Promise<KnowledgeHub>` | `GET /v2/properties/{id}/knowledge-hub` |
+| `client.knowledgeHub.createItem` | `(propertyUuid: string, content: string, options?: CreateKnowledgeHubItemOptions) => Promise<KnowledgeHubItem>` | `POST /v2/properties/{id}/knowledge-hub` |
+| `client.knowledgeHub.updateItem` | `(propertyUuid: string, itemId: number, content: string, options?: UpdateKnowledgeHubItemOptions) => Promise<KnowledgeHubItem>` | `PUT /v2/properties/{id}/knowledge-hub` |
+| `client.knowledgeHub.deleteItem` | `(propertyUuid: string, itemId: number) => Promise<void>` | `DELETE /v2/properties/{id}/knowledge-hub` |
+| `client.knowledgeHub.deleteTopic` | `(propertyUuid: string, topicId: number) => Promise<void>` | `DELETE /v2/properties/{id}/knowledge-hub` |
 
 ## Decision tables
 
@@ -121,6 +140,15 @@ Calling the wrong endpoint → `410 Gone` or `422 Unprocessable`. TypeScript pre
 | Any reservation by exact ID | `get(id, include?)` |
 
 `dateQuery` only accepts `'checkin'` or `'checkout'`. Anything else → `400`.
+
+**Which reservation write method?**
+
+| Goal | Call |
+| --- | --- |
+| Cancel a manual reservation | `reservations.cancel(uuid, 'host')` or `'guest'` |
+| Create a direct/manual booking | `reservations.create(params)` — see `CreateReservationParams` |
+| Update dates/guests/financials on a manual reservation | `reservations.update(uuid, params)` |
+| Update a single enrichment field (e.g. door code) | `reservations.updateEnrichment(uuid, 'smartlock_code', '1234')` |
 
 **Why does `getInHouse()` exist as a dedicated helper?** The Hospitable
 API only accepts a single `date_query` per request, so "arrived AND not
@@ -293,6 +321,87 @@ compile-time protection.
 
 Unknown `include` values are silently ignored by the API — don't rely
 on error feedback for typos.
+
+### `CreateReservationParams`
+
+```ts
+interface CreateReservationParams {
+  propertyId: string
+  currency: string                       // ISO 4217
+  arrivalDate: string                    // ISO YYYY-MM-DD
+  departureDate: string                  // ISO YYYY-MM-DD
+  guest: CreateReservationGuest
+  guests: CreateReservationGuestCounts
+  financials: CreateReservationFinancials // ⚠️ flat write-side shape — NOT ReservationFinancials
+}
+
+interface CreateReservationGuest {
+  firstName: string
+  lastName: string
+  email?: string
+  phone?: string
+}
+
+interface CreateReservationGuestCounts {
+  adults: number
+  children?: number
+  infants?: number
+}
+```
+
+### `UpdateReservationParams`
+
+Same shape as `CreateReservationParams` minus `propertyId` and `currency`. All fields optional — send only what changed.
+
+```ts
+interface UpdateReservationParams {
+  arrivalDate?: string
+  departureDate?: string
+  guest?: Partial<CreateReservationGuest>
+  guests?: Partial<CreateReservationGuestCounts>
+  financials?: Partial<CreateReservationFinancials>
+}
+```
+
+### `CreateQuoteParams`
+
+```ts
+interface CreateQuoteParams {
+  checkinDate: string       // ISO YYYY-MM-DD
+  checkoutDate: string      // ISO YYYY-MM-DD
+  guests: number
+  guestDetails?: {
+    adults: number
+    children?: number
+    infants?: number
+  }
+  promoCode?: string
+}
+```
+
+### `EnrichmentField`
+
+```ts
+interface EnrichmentField {
+  key: string             // shortcode, e.g. 'smartlock_code', 'wifi_password'
+  value: string | null    // current value, null if unset
+  description: string     // human-readable label
+  example: string         // example value hint
+}
+```
+
+### `CreateKnowledgeHubItemOptions` / `UpdateKnowledgeHubItemOptions`
+
+```ts
+interface CreateKnowledgeHubItemOptions {
+  topicId?: number       // add to existing topic by ID
+  topicName?: string     // create a new topic with this name (ignored if topicId set)
+}
+
+interface UpdateKnowledgeHubItemOptions {
+  topicId?: number       // move item to a different topic
+}
+```
 
 ## Shapes
 
@@ -635,6 +744,74 @@ interface Payout {
 }
 ```
 
+### `CreateReservationFinancials` (write-side — NOT `ReservationFinancials`)
+
+⚠️ **This is NOT the same as `ReservationFinancials`.** The write-side
+shape is flat (simple key-value amounts); the read-side shape
+(`ReservationFinancials` returned by `include=financials`) is deeply
+nested with `guest.fees[]`, `host.hostFees[]`, line-item objects, etc.
+Passing a read-side object to `reservations.create()` causes a
+TypeScript error — this is intentional.
+
+```ts
+interface CreateReservationFinancials {
+  accommodation: number      // total accommodation in minor currency units
+  cleaningFee?: number
+  petFee?: number
+  extraGuestFee?: number
+  tax?: number
+  platformFee?: number
+  hostServiceFee?: number
+}
+```
+
+### `KnowledgeHub`
+
+The knowledge hub is a per-property structure with topics containing
+nested items, plus optional sources.
+
+```ts
+interface KnowledgeHub {
+  topics: KnowledgeHubTopic[]
+  sources: KnowledgeHubSource[]
+}
+
+interface KnowledgeHubTopic {
+  id: number                    // numeric, not UUID
+  name: string
+  items: KnowledgeHubItem[]
+}
+
+interface KnowledgeHubItem {
+  id: number                    // numeric, not UUID
+  content: string
+  topicId: number
+  property: KnowledgeHubProperty
+}
+
+interface KnowledgeHubProperty {
+  id: string
+  name: string
+}
+
+interface KnowledgeHubSource {
+  id: number
+  type: string
+  url: string
+}
+```
+
+### `EnrichmentField`
+
+```ts
+interface EnrichmentField {
+  key: string             // shortcode key, e.g. 'smartlock_code'
+  value: string | null    // current value, null if unset
+  description: string     // human-readable label
+  example: string         // example value for the field
+}
+```
+
 ## Filters
 
 Immutable fluent builders. Terminal call: `.toParams()`.
@@ -887,6 +1064,111 @@ for await (const review of client.reviews.iter('prop-uuid', {
 }
 ```
 
+### Create a direct reservation
+
+```ts
+const reservation = await client.reservations.create({
+  propertyId: 'prop-uuid',
+  currency: 'USD',
+  arrivalDate: '2026-08-01',
+  departureDate: '2026-08-05',
+  guest: { firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' },
+  guests: { adults: 2, children: 1 },
+  financials: {
+    accommodation: 80000,  // $800.00 in cents
+    cleaningFee: 15000,
+    tax: 9500,
+  },
+})
+```
+
+⚠️ `financials` here is `CreateReservationFinancials` (flat), not the
+read-side `ReservationFinancials` (nested). See [Shapes](#createreservationfinancials-write-side--not-reservationfinancials).
+
+### Cancel a reservation
+
+```ts
+const cancelled = await client.reservations.cancel('res-uuid', 'host')
+// Only works on manual/direct reservations.
+```
+
+### Read + update enrichment data (setting a door code)
+
+```ts
+// List all enrichment fields for a reservation
+const fields = await client.reservations.listEnrichment('res-uuid')
+// fields: EnrichmentField[] — [{key: 'smartlock_code', value: null, ...}, ...]
+
+// Set a door code
+const updated = await client.reservations.updateEnrichment(
+  'res-uuid',
+  'smartlock_code',
+  '1234',
+)
+
+// Clear a value — pass null
+await client.reservations.updateEnrichment('res-uuid', 'smartlock_code', null)
+```
+
+### Get the Knowledge Hub for a property
+
+```ts
+const hub = await client.knowledgeHub.get('prop-uuid')
+for (const topic of hub.topics) {
+  console.log(`Topic: ${topic.name}`)
+  for (const item of topic.items) {
+    console.log(`  - ${item.content}`)
+  }
+}
+```
+
+### Create a Knowledge Hub item
+
+```ts
+// Add to an existing topic
+const item = await client.knowledgeHub.createItem(
+  'prop-uuid',
+  'Checkout is at 11 AM. Please strip the beds before leaving.',
+  { topicId: 42 },
+)
+
+// Or create a new topic in one call
+const item2 = await client.knowledgeHub.createItem(
+  'prop-uuid',
+  'The nearest grocery store is a 5 minute walk north on Main St.',
+  { topicName: 'Local Tips' },
+)
+```
+
+### Get a single transaction with payout included
+
+```ts
+const txn = await client.transactions.get('txn-uuid', 'payout')
+console.log(`${txn.type}: ${txn.paidOutAmount?.formatted}`)
+if (txn.payout) {
+  console.log(`Paid out via ${txn.payout.bankAccount} on ${txn.payout.date}`)
+}
+```
+
+### Add tags to a property
+
+```ts
+await client.properties.addTags('prop-uuid', ['pet-friendly', 'pool'])
+// Additive — does not replace existing tags.
+// Clears the entire property cache.
+```
+
+### Create an iCal import
+
+```ts
+const ical = await client.properties.createIcalImport(
+  'prop-uuid',
+  'https://calendar.google.com/calendar/ical/abc123/basic.ics',
+  { name: 'Google Calendar', host: { firstName: 'Jane', lastName: 'Doe' } },
+)
+console.log(`Import created: ${ical.name}, last sync: ${ical.lastSyncAt}`)
+```
+
 ## Pagination
 
 Every list resource exposes `iter()` — async-generator auto-pagination. Pull one item at a time; the generator fetches new pages lazily.
@@ -1020,6 +1302,10 @@ client.inquiries.clearCache()
 
 Default TTLs if `enabled: true` but `ttl` is omitted: `properties` 24h, `reservations` 1m, `inquiries` 1m.
 
+Note: `addTags()` clears the **entire** property cache (no per-property
+invalidation available). If you have a large property set cached,
+expect a cold-cache re-fetch on the next `list()` or `get()` call.
+
 ## Debug logging
 
 ```ts
@@ -1066,6 +1352,12 @@ Things that routinely trip up agents generating code against this SDK.
 20. **Only reservation message sends accept `senderId`** (co-host impersonation). Inquiry sends also accept `senderId`, but per the upstream API, it is only honored on Airbnb.
 21. **Unknown `include` values are silently ignored by the API.** Don't rely on error feedback for typos — pass only the literals in `ReservationIncludeField` / `ReviewIncludeField` / `InquiryIncludeField`. A misspelled include returns an empty-but-successful response.
 22. **URL IDs are auto-encoded.** Every `${id}` interpolation goes through `encodeURIComponent()` before hitting the wire — path-traversal attempts via `'../../admin'` resolve to an encoded no-op, not a different endpoint. You can pass untrusted-ish IDs without extra sanitization.
+23. **`CreateReservationFinancials` is NOT the same as `ReservationFinancials`.** The write-side is flat (`accommodation`, `cleaningFee`, etc.); the read-side is nested (`guest.fees[]`, `host.hostFees[]`, etc.). Passing a read-side object to `reservations.create()` causes a TS error — this is intentional.
+24. **`addTags()` is additive, not a replace.** To remove tags, use the Hospitable web UI. The method clears the entire property cache.
+25. **`updateIcalImport()` resync only triggers if >15 min since last sync.** Calling it repeatedly is a no-op until the 15-minute window elapses.
+26. **Knowledge Hub item/topic IDs are numeric (integers), not UUIDs.** Pass numbers, not strings, to `updateItem()`, `deleteItem()`, and `deleteTopic()`.
+27. **`createQuote()` requires the "Direct" feature** on the Hospitable account. Returns `unknown` because we couldn't probe the response shape — narrow at your call site.
+28. **Enrichment endpoint path is `/enrichment` not `/enrichment-data`.** The MCP docs say "enrichment-data" but the actual API 404s on that path and accepts `/enrichment`.
 
 ## Exported types
 
@@ -1083,6 +1375,7 @@ InquiriesResource
 UserResource
 TransactionsResource
 PayoutsResource
+KnowledgeHubResource
 
 // Property models
 Property, PropertyList, PropertyTag, PropertyImage, PropertySearchParams,
@@ -1092,7 +1385,8 @@ Property, PropertyList, PropertyTag, PropertyImage, PropertySearchParams,
   PropertyListingCoHost, PropertyDetails, PropertyBookings,
   PropertyBookingFee, PropertyListingMarkup, PropertyOccupancyFee,
   PropertyOccupancyBasedRules, PropertyPaymentTerms,
-  PropertyBookingPolicies, PropertyIcalImport
+  PropertyBookingPolicies, PropertyIcalImport,
+  CreateIcalImportOptions, UpdateIcalImportOptions
 
 // Reservation models
 Reservation, ReservationList, ReservationListParams,
@@ -1102,6 +1396,9 @@ Reservation, ReservationList, ReservationListParams,
   ReservationLegacyStatusHistoryEntry, ReservationUser,
   ReservationFinancials, ReservationFinancialsGuest,
   ReservationFinancialsHost, ReservationFinancialLineItem,
+  CancelReservationInitiatedBy, CreateReservationFinancials,
+  CreateReservationGuest, CreateReservationGuestCounts,
+  CreateReservationParams, UpdateReservationParams,
   Guest, ReservationGuests, normalizeReservation
 
 // Inquiry models
@@ -1131,6 +1428,17 @@ User
 // Financial models
 Money, Transaction, TransactionList, TransactionListParams,
   Payout, PayoutList, PayoutListParams
+
+// Knowledge Hub models
+KnowledgeHub, KnowledgeHubTopic, KnowledgeHubItem,
+  KnowledgeHubSource, KnowledgeHubProperty,
+  CreateKnowledgeHubItemOptions, UpdateKnowledgeHubItemOptions
+
+// Enrichment models
+EnrichmentField
+
+// Quote models
+CreateQuoteParams, Quote
 
 // Pagination
 PaginatedResponse<T>, paginate, collectAll, PageFetcher

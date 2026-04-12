@@ -7,6 +7,124 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 with the caveat that **while at 0.x, breaking changes land on the minor version**
 (standard npm semver for pre-1.0 libraries).
 
+## [0.6.0] — 2026-04-11
+
+Full parity with the official Hospitable MCP server. 17 new methods
+across 7 resource files close every gap between the SDK and the MCP
+tool surface. A follow-up review pass added 24 error-propagation tests
+and fixed 2 code issues.
+
+### ✨ Added
+
+- **`KnowledgeHubResource`** — new resource at `client.knowledgeHub`
+  managing the per-property AI knowledge base used by Hospitable's
+  automation to answer guest questions. Five methods:
+  - `knowledgeHub.get(propertyUuid)` — GET full knowledge hub (topics
+    with nested items + sources)
+  - `knowledgeHub.createItem(propertyUuid, content, options?)` — POST
+    new item, optionally into existing topic (`topicId`) or new topic
+    (`topicName`)
+  - `knowledgeHub.updateItem(propertyUuid, itemId, content, options?)`
+    — PUT update content, optionally move to different topic
+  - `knowledgeHub.deleteItem(propertyUuid, itemId)` — DELETE item
+  - `knowledgeHub.deleteTopic(propertyUuid, topicId)` — DELETE topic +
+    cascade items
+  - IDs are numeric (not UUIDs)
+
+- **Reservations — 6 new methods:**
+  - `reservations.cancel(uuid, initiatedBy)` — POST
+    `/v2/reservations/{uuid}/cancel`. `initiatedBy` is `'host' | 'guest'`.
+    Only works on manual reservations.
+  - `reservations.create(params)` — POST `/v2/reservations`. Creates a
+    direct/manual reservation. Uses new write-side input types
+    (`CreateReservationParams` with `CreateReservationFinancials`) — NOT
+    the same shape as the read-side `ReservationFinancials`.
+  - `reservations.update(uuid, params)` — PUT `/v2/reservations/{uuid}`.
+    Same params as create minus `propertyId` and `currency`.
+  - `reservations.listEnrichment(uuid)` — GET
+    `/v2/reservations/{uuid}/enrichment`. Returns enrichment fields
+    (key/value/description/example).
+  - `reservations.getEnrichment(uuid, key)` — GET single enrichment
+    field by shortcode key.
+  - `reservations.updateEnrichment(uuid, key, value)` — PUT
+    update/clear enrichment value. Pass `null` to clear.
+
+- **Properties — 4 new methods:**
+  - `properties.addTags(uuid, tags)` — POST
+    `/v2/properties/{uuid}/tags`. Additive (doesn't replace existing).
+    Accepts 1–10 tags; `ConfigurationError` guard on boundary. Clears
+    the entire property cache.
+  - `properties.createQuote(uuid, params)` — POST
+    `/v2/properties/{uuid}/quote`. Requires "Direct" feature. Return
+    typed as `unknown` (shape could not be probed). JSDoc `@returns`
+    explains why and how to narrow.
+  - `properties.createIcalImport(uuid, url, options?)` — POST
+    `/v2/properties/{uuid}/ical-imports`. Creates external calendar feed.
+  - `properties.updateIcalImport(uuid, icalUuid, options?)` — PUT
+    `/v2/properties/{uuid}/ical-imports/{icalUuid}`. Can change URL,
+    name, host, or force resync (only triggers if >15 min since last
+    sync).
+
+- **Transactions — 1 new method:**
+  - `transactions.get(uuid, include?)` — GET `/v2/transactions/{uuid}`.
+    Envelope: `{data: Transaction}`. Includes: `payout`, `reservation`.
+
+- **Payouts — 1 new method:**
+  - `payouts.get(uuid, include?)` — GET `/v2/payouts/{uuid}`.
+    Envelope: `{data: Payout}`. Includes: `transactions`.
+
+- **New model files:**
+  - `src/models/knowledge-hub.ts` — `KnowledgeHub`,
+    `KnowledgeHubTopic`, `KnowledgeHubItem`, `KnowledgeHubSource`,
+    `KnowledgeHubProperty`, `CreateKnowledgeHubItemOptions`,
+    `UpdateKnowledgeHubItemOptions`
+  - `src/models/enrichment.ts` — `EnrichmentField` (`{key, value,
+    description, example}`)
+  - `src/models/quote.ts` — `CreateQuoteParams`, `Quote` (`unknown`)
+
+- **Extended models:**
+  - `Reservation` — `CancelReservationInitiatedBy`,
+    `CreateReservationFinancials`, `CreateReservationGuest`,
+    `CreateReservationGuestCounts`, `CreateReservationParams`,
+    `UpdateReservationParams`
+  - `Property` — `CreateIcalImportOptions`, `UpdateIcalImportOptions`
+  - `Transaction` — optional `payout?`, `reservation?` include-gated
+    fields
+  - `Payout` — optional `transactions?` include-gated field
+
+### 🐛 Fixed (from review)
+
+- `updateIcalImport()` `options` parameter now defaults to `{}` so PUT
+  always sends a body (previously could send an empty request).
+- `createQuote()` JSDoc now has `@returns` explaining why return is
+  `unknown` and how to narrow.
+- `create()` normalization test fixture used `'accepted'` instead of
+  `'canceled'` for the status-normalization path.
+
+### 🧪 Tests
+
+- **447 → 538** (+91 total: 67 initial + 24 from review)
+- New test file: `src/__tests__/knowledge-hub.test.ts` (18 tests)
+- Every new method has the full success/failure/rate-limit triad per
+  AGENTS.md TDD policy
+- 24 error-propagation tests added during review to cover all 17 new
+  methods
+
+### 🔬 Method of discovery
+
+- MCP server audit: compared the Hospitable MCP server's 39 tools
+  against the SDK surface to identify every gap
+- MCP tool schemas provided authoritative input shapes for write
+  endpoints whose PAT scope blocked direct probing (403)
+- Read-side shapes confirmed via live API probes
+- Endpoint paths confirmed empirically: 403 = path exists but needs
+  scope, 404 = wrong path (e.g. `/v2/properties/{uuid}/quote` singular,
+  not plural; `/v2/reservations/{uuid}/enrichment` not
+  `/enrichment-data`)
+- Probe script: `examples/probe-new-endpoints.ts`
+
+---
+
 ## [0.5.4] — 2026-04-11
 
 Schema audit against the 7 official Hospitable schema pages found three
@@ -360,6 +478,7 @@ Releases before `0.5.0` (`0.1.x` through `0.4.1`) predate this CHANGELOG and
 are not documented here. Reference `git log` for commit-level history and
 any existing ADRs in `/decisions/` for architectural decisions.
 
+[0.6.0]: https://github.com/kacao/hospitable/releases/tag/v0.6.0
 [0.5.0]: https://github.com/kacao/hospitable/releases/tag/v0.5.0
 [0.5.1]: https://github.com/kacao/hospitable/releases/tag/v0.5.1
 [0.5.2]: https://github.com/kacao/hospitable/releases/tag/v0.5.2
