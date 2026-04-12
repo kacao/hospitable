@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 with the caveat that **while at 0.x, breaking changes land on the minor version**
 (standard npm semver for pre-1.0 libraries).
 
+## [0.5.1] — 2026-04-11
+
+### ✨ Added
+
+- **`Property` include support.** `client.properties.list()` and
+  `client.properties.get()` now accept an `include` query parameter with
+  four valid values: `'user'`, `'listings'`, `'details'`, `'bookings'`.
+  Previously the SDK didn't expose this even though the Hospitable API
+  supports it per [the docs](https://developer.hospitable.com/docs/public-api-docs/qc4x36uhxinx3-get-properties).
+  - `include=user` → populates `property.user: PropertyUser` (id, email, name, profilePicture)
+  - `include=listings` → populates `property.listings: PropertyListing[]` — one entry per booking channel with `platform`, `platformId`, `coHosts[]`, etc.
+  - `include=details` → populates `property.details: PropertyDetails` — host-operational info (`wifiName`, `wifiPassword`, `houseManual`, `guestAccess`, `gettingAround`, `neighborhoodDescription`, `additionalRules`, `otherDetails`, `spaceOverview`)
+  - `include=bookings` → populates `property.bookings` — typed as `unknown` (opaque pricing/policy configuration object)
+- **`PropertyFilter.include(...fields)`** fluent method with
+  TypeScript-level narrowing via `PropertyIncludeField`. Unknown includes
+  are silently ignored by the API, so this is the only fail-fast typo
+  check.
+- **New type exports**: `PropertyIncludeField`, `PropertyUser`,
+  `PropertyListing`, `PropertyListingCoHost`, `PropertyDetails`,
+  `PropertyBookings`.
+
+### 🐛 Fixed
+
+- **`properties.get()` envelope unwrap.** The `/v2/properties/{id}`
+  endpoint wraps its response in `{data: Property}` (like `/v2/user`),
+  but the SDK was typing the response as `Property` directly. Callers
+  were effectively receiving `{data: Property}` at runtime with no type
+  error, which meant `property.name` was `undefined` and `property.data.name`
+  actually held the data. This bug was invisible to tests because mock
+  responses were pre-shaped at the already-unwrapped level, never
+  exercising the envelope. Discovered while adding `include` support and
+  probing the real endpoint.
+
+### 🔒 Security
+
+- **`wifiPassword` redaction verified.** The existing `SENSITIVE_PATTERN`
+  regex matches `/password/i`, so `wifiPassword` (and the snake_case
+  `wifi_password` variant) on `property.details` is automatically
+  redacted in debug logs and thrown `ValidationError.fields`. Added
+  explicit regression tests in `sanitize.test.ts`.
+
+### 🧪 Tests
+
+- **434 tests** (up from 420 in 0.5.0). New coverage:
+  - `properties.test.ts` → 8 new tests: `list({ include })`, `get(id, include)` signature + forwarding, cache-key separation when include differs, and include-shape deserialization for each of the four include values (`user`, `listings`, `details`, `bookings`, combined)
+  - `filters.test.ts` → 5 new `PropertyFilter` tests: `.include()` method, chaining, immutability
+  - `sanitize.test.ts` → 2 new regression guards verifying `wifiPassword` / `wifi_password` redaction on `property.details`
+- Existing `properties.get()` tests and `cache.test.ts` mocks updated to
+  wrap responses in `{data: ...}` to match the real envelope shape.
+
+---
+
 ## [0.5.0] — 2026-04-11
 
 Breaking release after an empirical audit against the live Hospitable API.
@@ -121,3 +173,4 @@ are not documented here. Reference `git log` for commit-level history and
 any existing ADRs in `/decisions/` for architectural decisions.
 
 [0.5.0]: https://github.com/kacao/hospitable/releases/tag/v0.5.0
+[0.5.1]: https://github.com/kacao/hospitable/releases/tag/v0.5.1
