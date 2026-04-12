@@ -16,3 +16,5 @@ export { UserResource } from './user'
 export { TransactionsResource } from './transactions'
 
 export { PayoutsResource } from './payouts'
+
+export { KnowledgeHubResource } from './knowledge-hub'

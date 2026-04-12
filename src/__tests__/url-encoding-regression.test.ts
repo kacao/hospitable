@@ -188,6 +188,148 @@ describe('URL path traversal prevention — ID encoding regression', () => {
     })
   })
 
+  describe('reservations (new methods)', () => {
+    it('reservations.cancel() encodes the uuid', async () => {
+      const { calls } = captureFetch()
+      const client = new HospitableClient({ token: 'test' })
+      await client.reservations.cancel(EVIL_ID, 'host').catch(() => {})
+      expectSafeUrl(calls[0]!, '/v2/reservations/')
+      expect(calls[0]!).toContain('/cancel')
+    })
+
+    it('reservations.update() encodes the uuid', async () => {
+      const { calls } = captureFetch()
+      const client = new HospitableClient({ token: 'test' })
+      await client.reservations.update(EVIL_ID, {
+        checkIn: '2026-06-01', checkOut: '2026-06-05',
+        guests: { adults: 2 },
+        guest: { firstName: 'J', lastName: 'D', email: 'j@d.com' },
+        language: 'en', financials: { accommodation: 50000 },
+      }).catch(() => {})
+      expectSafeUrl(calls[0]!, '/v2/reservations/')
+    })
+
+    it('reservations.listEnrichment() encodes the uuid', async () => {
+      const { calls } = captureFetch()
+      const client = new HospitableClient({ token: 'test' })
+      await client.reservations.listEnrichment(EVIL_ID).catch(() => {})
+      expectSafeUrl(calls[0]!, '/v2/reservations/')
+      expect(calls[0]!).toContain('/enrichment')
+    })
+
+    it('reservations.getEnrichment() encodes uuid and key', async () => {
+      const { calls } = captureFetch()
+      const client = new HospitableClient({ token: 'test' })
+      await client.reservations.getEnrichment(EVIL_ID, EVIL_ID).catch(() => {})
+      expectSafeUrl(calls[0]!, '/v2/reservations/')
+      expect(calls[0]!).toContain('/enrichment/')
+    })
+
+    it('reservations.updateEnrichment() encodes uuid and key', async () => {
+      const { calls } = captureFetch()
+      const client = new HospitableClient({ token: 'test' })
+      await client.reservations.updateEnrichment(EVIL_ID, EVIL_ID, 'val').catch(() => {})
+      expectSafeUrl(calls[0]!, '/v2/reservations/')
+      expect(calls[0]!).toContain('/enrichment/')
+    })
+  })
+
+  describe('properties (new methods)', () => {
+    it('properties.addTags() encodes the uuid', async () => {
+      const { calls } = captureFetch()
+      const client = new HospitableClient({ token: 'test' })
+      await client.properties.addTags(EVIL_ID, ['tag']).catch(() => {})
+      expectSafeUrl(calls[0]!, '/v2/properties/')
+      expect(calls[0]!).toContain('/tags')
+    })
+
+    it('properties.createQuote() encodes the uuid', async () => {
+      const { calls } = captureFetch()
+      const client = new HospitableClient({ token: 'test' })
+      await client.properties.createQuote(EVIL_ID, {
+        checkinDate: '2026-06-01', checkoutDate: '2026-06-05', guests: { adults: 2 },
+      }).catch(() => {})
+      expectSafeUrl(calls[0]!, '/v2/properties/')
+      expect(calls[0]!).toContain('/quote')
+    })
+
+    it('properties.createIcalImport() encodes the uuid', async () => {
+      const { calls } = captureFetch()
+      const client = new HospitableClient({ token: 'test' })
+      await client.properties.createIcalImport(EVIL_ID, 'https://example.com/feed.ics').catch(() => {})
+      expectSafeUrl(calls[0]!, '/v2/properties/')
+      expect(calls[0]!).toContain('/ical-imports')
+    })
+
+    it('properties.updateIcalImport() encodes both uuid and icalUuid', async () => {
+      const { calls } = captureFetch()
+      const client = new HospitableClient({ token: 'test' })
+      await client.properties.updateIcalImport(EVIL_ID, EVIL_ID, { resync: true }).catch(() => {})
+      expectSafeUrl(calls[0]!, '/v2/properties/')
+      expect(calls[0]!).toContain('/ical-imports/')
+    })
+  })
+
+  describe('transactions (new methods)', () => {
+    it('transactions.get() encodes the uuid', async () => {
+      const { calls } = captureFetch()
+      const client = new HospitableClient({ token: 'test' })
+      await client.transactions.get(EVIL_ID).catch(() => {})
+      expectSafeUrl(calls[0]!, '/v2/transactions/')
+    })
+  })
+
+  describe('payouts (new methods)', () => {
+    it('payouts.get() encodes the uuid', async () => {
+      const { calls } = captureFetch()
+      const client = new HospitableClient({ token: 'test' })
+      await client.payouts.get(EVIL_ID).catch(() => {})
+      expectSafeUrl(calls[0]!, '/v2/payouts/')
+    })
+  })
+
+  describe('knowledge hub', () => {
+    it('knowledgeHub.get() encodes the property uuid', async () => {
+      const { calls } = captureFetch()
+      const client = new HospitableClient({ token: 'test' })
+      await client.knowledgeHub.get(EVIL_ID).catch(() => {})
+      expectSafeUrl(calls[0]!, '/v2/properties/')
+      expect(calls[0]!).toContain('/knowledge-hub')
+    })
+
+    it('knowledgeHub.createItem() encodes the property uuid', async () => {
+      const { calls } = captureFetch()
+      const client = new HospitableClient({ token: 'test' })
+      await client.knowledgeHub.createItem(EVIL_ID, 'content').catch(() => {})
+      expectSafeUrl(calls[0]!, '/v2/properties/')
+      expect(calls[0]!).toContain('/knowledge-hub/items')
+    })
+
+    it('knowledgeHub.updateItem() encodes property uuid and itemId', async () => {
+      const { calls } = captureFetch()
+      const client = new HospitableClient({ token: 'test' })
+      await client.knowledgeHub.updateItem(EVIL_ID, 123, 'content').catch(() => {})
+      expectSafeUrl(calls[0]!, '/v2/properties/')
+      expect(calls[0]!).toContain('/knowledge-hub/items/')
+    })
+
+    it('knowledgeHub.deleteItem() encodes property uuid and itemId', async () => {
+      const { calls } = captureFetch()
+      const client = new HospitableClient({ token: 'test' })
+      await client.knowledgeHub.deleteItem(EVIL_ID, 456).catch(() => {})
+      expectSafeUrl(calls[0]!, '/v2/properties/')
+      expect(calls[0]!).toContain('/knowledge-hub/items/')
+    })
+
+    it('knowledgeHub.deleteTopic() encodes property uuid and topicId', async () => {
+      const { calls } = captureFetch()
+      const client = new HospitableClient({ token: 'test' })
+      await client.knowledgeHub.deleteTopic(EVIL_ID, 789).catch(() => {})
+      expectSafeUrl(calls[0]!, '/v2/properties/')
+      expect(calls[0]!).toContain('/knowledge-hub/topics/')
+    })
+  })
+
   describe('special characters (not just traversal)', () => {
     it('properties.get() encodes spaces, slashes, and query-param meta-chars', async () => {
       const { calls } = captureFetch()

@@ -1,13 +1,18 @@
 import type { HttpClient, RequestOptions } from '../http/client'
 import type {
   Property,
+  PropertyIcalImport,
   PropertyImage,
   PropertyList,
   PropertySearchParams,
   PropertyTag,
+  CreateIcalImportOptions,
+  UpdateIcalImportOptions,
 } from '../models/property'
+import type { CreateQuoteParams } from '../models/quote'
 import { paginate } from '../http/paginate'
 import { MemoryCache, cacheKey, type CacheConfig } from '../utils/cache'
+import { ConfigurationError } from '../errors'
 
 const DEFAULT_TTL = 86_400_000
 
@@ -162,6 +167,77 @@ export class PropertiesResource {
    */
   async *iter(params: Omit<PropertyListParams, 'page'> = {}): AsyncGenerator<Property> {
     yield* paginate<Property, PropertyListParams>(p => this.fetchList(p), params)
+  }
+
+  /**
+   * Add tags to a property. The API accepts 1-10 tags per call.
+   *
+   * @see POST https://public.api.hospitable.com/v2/properties/{id}/tags
+   * @throws {ConfigurationError} when `tags` is empty or exceeds 10 items
+   */
+  async addTags(uuid: string, tags: string[]): Promise<void> {
+    if (tags.length === 0 || tags.length > 10) {
+      throw new ConfigurationError(
+        'properties.addTags: `tags` must contain 1-10 tag strings. ' +
+        'The Hospitable API rejects empty or oversized tag arrays. ' +
+        'Example: client.properties.addTags(propertyId, ["beach", "pool"]).',
+      )
+    }
+    await this.http.post<void>(
+      `/v2/properties/${encodeURIComponent(uuid)}/tags`,
+      { tags },
+    )
+    this.cache?.clear()
+  }
+
+  /**
+   * Request a price quote for a property.
+   *
+   * Requires the "Direct" feature on the Hospitable account. Response
+   * shape is typed as `unknown` — see {@link CreateQuoteParams} for the
+   * input contract.
+   *
+   * @see POST https://public.api.hospitable.com/v2/properties/{id}/quote
+   */
+  async createQuote(uuid: string, params: CreateQuoteParams): Promise<unknown> {
+    return this.http.post<unknown>(
+      `/v2/properties/${encodeURIComponent(uuid)}/quote`,
+      params,
+    )
+  }
+
+  /**
+   * Create an iCal import feed on a property.
+   *
+   * @see POST https://public.api.hospitable.com/v2/properties/{id}/ical-imports
+   */
+  async createIcalImport(
+    uuid: string,
+    url: string,
+    options?: CreateIcalImportOptions,
+  ): Promise<PropertyIcalImport> {
+    const response = await this.http.post<{ data: PropertyIcalImport }>(
+      `/v2/properties/${encodeURIComponent(uuid)}/ical-imports`,
+      { url, ...options },
+    )
+    return response.data
+  }
+
+  /**
+   * Update an existing iCal import feed on a property.
+   *
+   * @see PUT https://public.api.hospitable.com/v2/properties/{id}/ical-imports/{icalUuid}
+   */
+  async updateIcalImport(
+    uuid: string,
+    icalUuid: string,
+    options?: UpdateIcalImportOptions,
+  ): Promise<PropertyIcalImport> {
+    const response = await this.http.put<{ data: PropertyIcalImport }>(
+      `/v2/properties/${encodeURIComponent(uuid)}/ical-imports/${encodeURIComponent(icalUuid)}`,
+      options,
+    )
+    return response.data
   }
 
   /** Drop the in-memory cache. Called automatically by the client on 401 re-auth. */

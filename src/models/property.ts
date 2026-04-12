@@ -360,6 +360,29 @@ export interface Property {
   bookings?: PropertyBookings
 }
 
+/**
+ * Options for creating an iCal import on a property.
+ *
+ * @see POST https://public.api.hospitable.com/v2/properties/{id}/ical-imports
+ */
+export interface CreateIcalImportOptions {
+  name?: string
+  host?: { firstName?: string; lastName?: string }
+}
+
+/**
+ * Options for updating an existing iCal import on a property.
+ *
+ * @see PUT https://public.api.hospitable.com/v2/properties/{id}/ical-imports/{icalUuid}
+ */
+export interface UpdateIcalImportOptions {
+  url?: string
+  name?: string
+  host?: { firstName?: string; lastName?: string }
+  /** When `true`, triggers an immediate resync of the feed. */
+  resync?: boolean
+}
+
 export type PropertyList = import('./pagination').PaginatedResponse<Property>
 
 /**

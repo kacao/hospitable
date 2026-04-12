@@ -8,6 +8,7 @@ import { InquiriesResource } from '../resources/inquiries'
 import { UserResource } from '../resources/user'
 import { TransactionsResource } from '../resources/transactions'
 import { PayoutsResource } from '../resources/payouts'
+import { KnowledgeHubResource } from '../resources/knowledge-hub'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -117,6 +118,11 @@ describe('HospitableClient', () => {
   it('exposes client.payouts (PayoutsResource)', () => {
     const client = new HospitableClient({ token: 'pat' })
     expect(client.payouts).toBeInstanceOf(PayoutsResource)
+  })
+
+  it('exposes client.knowledgeHub (KnowledgeHubResource)', () => {
+    const client = new HospitableClient({ token: 'pat' })
+    expect(client.knowledgeHub).toBeInstanceOf(KnowledgeHubResource)
   })
 
   it('a 401 from the API triggers token refresh and retries the request', async () => {

@@ -19,6 +19,8 @@ export interface Payout {
   amount: Money
   /** ISO 8601 timestamp of when the payout was disbursed. */
   date: string
+  /** Populated when `include=transactions` is requested. */
+  transactions?: unknown[]
 }
 
 export type PayoutList = import('./pagination').PaginatedResponse<Payout>

@@ -24,6 +24,20 @@ export class PayoutsResource {
   }
 
   /**
+   * Fetch a single payout by UUID.
+   *
+   * @see GET https://public.api.hospitable.com/v2/payouts/{uuid}
+   * @throws {NotFoundError} on 404
+   */
+  async get(uuid: string, include?: string): Promise<Payout> {
+    const response = await this.http.get<{ data: Payout }>(
+      `/v2/payouts/${encodeURIComponent(uuid)}`,
+      include ? { include } : undefined,
+    )
+    return response.data
+  }
+
+  /**
    * List payouts. Use `startDate`/`endDate` to scope to a reporting window.
    *
    * @see GET https://public.api.hospitable.com/v2/payouts

@@ -359,6 +359,90 @@ export function normalizeReservation(reservation: Reservation): Reservation {
   return reservation
 }
 
+/**
+ * Who initiated the cancellation — used as the body of
+ * `POST /v2/reservations/{uuid}/cancel`.
+ */
+export type CancelReservationInitiatedBy = 'host' | 'guest'
+
+/**
+ * WRITE-side input shape for reservation financials. NOT the same as
+ * {@link ReservationFinancials} (READ-side with nested guest/host
+ * subsections). All amounts in minor currency units (cents).
+ *
+ * @see POST https://public.api.hospitable.com/v2/reservations
+ */
+export interface CreateReservationFinancials {
+  /** ISO 4217 currency code (e.g. `"USD"`). */
+  currency: string
+  /** Base accommodation amount in minor currency units. */
+  accommodation: number
+  cleaningFee?: number
+  linenFee?: number
+  managementFee?: number
+  communityFee?: number
+  petFee?: number
+  resortFee?: number
+  passThroughTaxes?: number
+  otherFees?: Array<{ label: string; amount: number }>
+}
+
+/** Guest contact info for creating a reservation. */
+export interface CreateReservationGuest {
+  firstName: string
+  lastName: string
+  email: string
+  phone?: string
+}
+
+/** Guest headcounts for creating/updating a reservation. */
+export interface CreateReservationGuestCounts {
+  adults: number
+  children?: number
+  infants?: number
+  pets?: number
+}
+
+/**
+ * Parameters for `POST /v2/reservations` — creating a direct reservation.
+ *
+ * @see POST https://public.api.hospitable.com/v2/reservations
+ */
+export interface CreateReservationParams {
+  propertyId: string
+  /** ISO `YYYY-MM-DD` check-in date. */
+  checkIn: string
+  /** ISO `YYYY-MM-DD` check-out date. */
+  checkOut: string
+  guests: CreateReservationGuestCounts
+  guest: CreateReservationGuest
+  /** Two-letter language code (e.g. `"en"`). */
+  language: string
+  financials: CreateReservationFinancials
+  channel?: string
+  notes?: string
+  reservationCode?: string
+  include?: string
+}
+
+/**
+ * Parameters for `PUT /v2/reservations/{uuid}` — updating an existing
+ * reservation. Currency is not required on update (inherited from the
+ * existing reservation).
+ *
+ * @see PUT https://public.api.hospitable.com/v2/reservations/{uuid}
+ */
+export interface UpdateReservationParams {
+  checkIn: string
+  checkOut: string
+  guests: CreateReservationGuestCounts
+  guest: CreateReservationGuest
+  language: string
+  financials: Omit<CreateReservationFinancials, 'currency'>
+  notes?: string
+  include?: string
+}
+
 export interface ReservationListParams {
   /**
    * Property UUIDs to scope the search to. **Required by the API** — omit

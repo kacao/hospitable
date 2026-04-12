@@ -12,6 +12,7 @@ import { ReviewsResource } from './resources/reviews'
 import { UserResource } from './resources/user'
 import { TransactionsResource } from './resources/transactions'
 import { PayoutsResource } from './resources/payouts'
+import { KnowledgeHubResource } from './resources/knowledge-hub'
 
 export interface ResourceCacheConfig {
   properties?: CacheConfig
@@ -48,6 +49,7 @@ export class HospitableClient {
   readonly user: UserResource
   readonly transactions: TransactionsResource
   readonly payouts: PayoutsResource
+  readonly knowledgeHub: KnowledgeHubResource
 
   constructor(config: HospitableClientConfig = {}) {
     const baseURL = config.baseURL ?? 'https://public.api.hospitable.com'
@@ -84,5 +86,6 @@ export class HospitableClient {
     this.user = new UserResource(httpClient)
     this.transactions = new TransactionsResource(httpClient)
     this.payouts = new PayoutsResource(httpClient)
+    this.knowledgeHub = new KnowledgeHubResource(httpClient)
   }
 }

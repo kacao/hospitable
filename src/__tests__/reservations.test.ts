@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { ReservationsResource } from '../resources/reservations'
 import type { HttpClient } from '../http/client'
-import type { ReservationList, Reservation } from '../models/reservation'
-import { ConfigurationError } from '../errors'
+import type { ReservationList, Reservation, CreateReservationParams, UpdateReservationParams } from '../models/reservation'
+import type { EnrichmentField } from '../models/enrichment'
+import { ConfigurationError, NotFoundError, ValidationError } from '../errors'
 import { makeHttpClient } from './helpers'
 
 function makeReservation(overrides: Partial<Reservation> = {}): Reservation {
@@ -431,6 +432,177 @@ describe('ReservationsResource', () => {
 
       const result = await resource.getInHouse(['prop1'])
       expect(result).toHaveLength(1)
+    })
+  })
+
+  describe('cancel()', () => {
+    it('calls POST /v2/reservations/{uuid}/cancel with initiatedBy', async () => {
+      const res = makeReservation({ id: 'res-42', status: 'cancelled' })
+      vi.mocked(http.post).mockResolvedValue(res)
+
+      const result = await resource.cancel('res-42', 'host')
+
+      expect(http.post).toHaveBeenCalledWith(
+        '/v2/reservations/res-42/cancel',
+        { initiatedBy: 'host' },
+      )
+      expect(result.id).toBe('res-42')
+    })
+
+    it('normalizes statusHistory on the returned reservation', async () => {
+      const res = makeReservation({
+        statusHistory: [
+          { category: 'Cancelled', status: 'canceled', changedAt: '2026-01-01T00:00:00+00:00' },
+        ],
+      })
+      vi.mocked(http.post).mockResolvedValue(res)
+
+      const result = await resource.cancel('res-1', 'guest')
+      expect(result.statusHistory[0]!.status).toBe('cancelled')
+    })
+
+    it('propagates ValidationError on 422', async () => {
+      vi.mocked(http.post).mockRejectedValue(new ValidationError('Invalid'))
+      await expect(resource.cancel('res-1', 'host')).rejects.toBeInstanceOf(ValidationError)
+    })
+  })
+
+  describe('create()', () => {
+    const createParams: CreateReservationParams = {
+      propertyId: 'prop-1',
+      checkIn: '2026-06-01',
+      checkOut: '2026-06-05',
+      guests: { adults: 2 },
+      guest: { firstName: 'John', lastName: 'Doe', email: 'john@example.com' },
+      language: 'en',
+      financials: { currency: 'USD', accommodation: 50000 },
+    }
+
+    it('calls POST /v2/reservations with params', async () => {
+      const res = makeReservation({ id: 'new-res' })
+      vi.mocked(http.post).mockResolvedValue(res)
+
+      const result = await resource.create(createParams)
+
+      expect(http.post).toHaveBeenCalledWith('/v2/reservations', createParams)
+      expect(result.id).toBe('new-res')
+    })
+
+    it('normalizes statusHistory on the returned reservation', async () => {
+      const res = makeReservation({
+        statusHistory: [
+          { category: 'Accepted', status: 'accepted', changedAt: '2026-01-01T00:00:00+00:00' },
+        ],
+      })
+      vi.mocked(http.post).mockResolvedValue(res)
+
+      const result = await resource.create(createParams)
+      expect(result.statusHistory[0]!.status).toBe('accepted')
+    })
+  })
+
+  describe('update()', () => {
+    const updateParams: UpdateReservationParams = {
+      checkIn: '2026-06-02',
+      checkOut: '2026-06-06',
+      guests: { adults: 3 },
+      guest: { firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' },
+      language: 'en',
+      financials: { accommodation: 60000 },
+    }
+
+    it('calls PUT /v2/reservations/{uuid} with params', async () => {
+      const res = makeReservation({ id: 'res-42' })
+      vi.mocked(http.put).mockResolvedValue(res)
+
+      const result = await resource.update('res-42', updateParams)
+
+      expect(http.put).toHaveBeenCalledWith(
+        '/v2/reservations/res-42',
+        updateParams,
+      )
+      expect(result.id).toBe('res-42')
+    })
+
+    it('normalizes statusHistory on the returned reservation', async () => {
+      const res = makeReservation({
+        statusHistory: [
+          { category: 'Cancelled', status: 'canceled', changedAt: '2026-01-01T00:00:00+00:00' },
+        ],
+      })
+      vi.mocked(http.put).mockResolvedValue(res)
+
+      const result = await resource.update('res-1', updateParams)
+      expect(result.statusHistory[0]!.status).toBe('cancelled')
+    })
+  })
+
+  describe('listEnrichment()', () => {
+    it('calls GET /v2/reservations/{uuid}/enrichment and unwraps .data', async () => {
+      const fields: EnrichmentField[] = [
+        { key: 'arrival_time', value: '3pm', description: 'Guest arrival time', example: '3pm' },
+      ]
+      vi.mocked(http.get).mockResolvedValue({ data: fields })
+
+      const result = await resource.listEnrichment('res-1')
+
+      expect(http.get).toHaveBeenCalledWith(
+        '/v2/reservations/res-1/enrichment',
+      )
+      expect(result).toEqual(fields)
+    })
+
+    it('propagates NotFoundError on 404', async () => {
+      vi.mocked(http.get).mockRejectedValue(new NotFoundError('Not found'))
+      await expect(resource.listEnrichment('missing')).rejects.toBeInstanceOf(NotFoundError)
+    })
+  })
+
+  describe('getEnrichment()', () => {
+    it('calls GET /v2/reservations/{uuid}/enrichment/{key}', async () => {
+      const field: EnrichmentField = {
+        key: 'arrival_time', value: '3pm', description: 'Guest arrival time', example: '3pm',
+      }
+      vi.mocked(http.get).mockResolvedValue(field)
+
+      const result = await resource.getEnrichment('res-1', 'arrival_time')
+
+      expect(http.get).toHaveBeenCalledWith(
+        '/v2/reservations/res-1/enrichment/arrival_time',
+      )
+      expect(result).toEqual(field)
+    })
+  })
+
+  describe('updateEnrichment()', () => {
+    it('calls PUT /v2/reservations/{uuid}/enrichment/{key} with value', async () => {
+      const field: EnrichmentField = {
+        key: 'arrival_time', value: '5pm', description: 'Guest arrival time', example: '3pm',
+      }
+      vi.mocked(http.put).mockResolvedValue(field)
+
+      const result = await resource.updateEnrichment('res-1', 'arrival_time', '5pm')
+
+      expect(http.put).toHaveBeenCalledWith(
+        '/v2/reservations/res-1/enrichment/arrival_time',
+        { value: '5pm' },
+      )
+      expect(result.value).toBe('5pm')
+    })
+
+    it('passes null to clear the enrichment value', async () => {
+      const field: EnrichmentField = {
+        key: 'arrival_time', value: null, description: 'Guest arrival time', example: '3pm',
+      }
+      vi.mocked(http.put).mockResolvedValue(field)
+
+      const result = await resource.updateEnrichment('res-1', 'arrival_time', null)
+
+      expect(http.put).toHaveBeenCalledWith(
+        '/v2/reservations/res-1/enrichment/arrival_time',
+        { value: null },
+      )
+      expect(result.value).toBeNull()
     })
   })
 

@@ -105,6 +105,38 @@ describe('TransactionsResource', () => {
     expect(params['page']).toBe(2)
   })
 
+  describe('get()', () => {
+    it('calls GET /v2/transactions/{uuid} and unwraps .data', async () => {
+      const tx = makeTransaction({ id: 'tx-42' })
+      vi.mocked(http.get).mockResolvedValue({ data: tx })
+
+      const result = await resource.get('tx-42')
+
+      expect(http.get).toHaveBeenCalledWith('/v2/transactions/tx-42', undefined)
+      expect(result).toEqual(tx)
+    })
+
+    it('passes include param when provided', async () => {
+      const tx = makeTransaction()
+      vi.mocked(http.get).mockResolvedValue({ data: tx })
+
+      await resource.get('tx-1', 'payout,reservation')
+
+      expect(http.get).toHaveBeenCalledWith(
+        '/v2/transactions/tx-1',
+        { include: 'payout,reservation' },
+      )
+    })
+
+    it('does not pass include when undefined', async () => {
+      vi.mocked(http.get).mockResolvedValue({ data: makeTransaction() })
+
+      await resource.get('tx-1')
+
+      expect(http.get).toHaveBeenCalledWith('/v2/transactions/tx-1', undefined)
+    })
+  })
+
   describe('error propagation', () => {
     it('throws AuthenticationError on 401', async () => {
       vi.mocked(http.get).mockRejectedValue(new AuthenticationError('Invalid token'))

@@ -3,8 +3,12 @@ import type {
   Reservation,
   ReservationList,
   ReservationListParams,
+  CancelReservationInitiatedBy,
+  CreateReservationParams,
+  UpdateReservationParams,
 } from '../models/reservation'
 import { normalizeReservation } from '../models/reservation'
+import type { EnrichmentField } from '../models/enrichment'
 import { paginate } from '../http/paginate'
 import { MemoryCache, cacheKey, type CacheConfig } from '../utils/cache'
 import { ConfigurationError } from '../errors'
@@ -227,6 +231,77 @@ export class ReservationsResource {
   async *iter(params: Omit<ReservationListParams, 'page'>): AsyncGenerator<Reservation> {
     assertPropertiesPresent(params)
     yield* paginate<Reservation, ReservationListParams>(p => this.fetchList(p), params)
+  }
+
+  /**
+   * Cancel a reservation.
+   *
+   * @see POST https://public.api.hospitable.com/v2/reservations/{uuid}/cancel
+   */
+  async cancel(uuid: string, initiatedBy: CancelReservationInitiatedBy): Promise<Reservation> {
+    const raw = await this.http.post<Reservation>(
+      `/v2/reservations/${encodeURIComponent(uuid)}/cancel`,
+      { initiatedBy },
+    )
+    return normalizeReservation(raw)
+  }
+
+  /**
+   * Create a new direct reservation.
+   *
+   * @see POST https://public.api.hospitable.com/v2/reservations
+   */
+  async create(params: CreateReservationParams): Promise<Reservation> {
+    const raw = await this.http.post<Reservation>('/v2/reservations', params)
+    return normalizeReservation(raw)
+  }
+
+  /**
+   * Update an existing reservation.
+   *
+   * @see PUT https://public.api.hospitable.com/v2/reservations/{uuid}
+   */
+  async update(uuid: string, params: UpdateReservationParams): Promise<Reservation> {
+    const raw = await this.http.put<Reservation>(
+      `/v2/reservations/${encodeURIComponent(uuid)}`,
+      params,
+    )
+    return normalizeReservation(raw)
+  }
+
+  /**
+   * List all enrichment fields for a reservation.
+   *
+   * @see GET https://public.api.hospitable.com/v2/reservations/{uuid}/enrichment
+   */
+  async listEnrichment(uuid: string): Promise<EnrichmentField[]> {
+    const response = await this.http.get<{ data: EnrichmentField[] }>(
+      `/v2/reservations/${encodeURIComponent(uuid)}/enrichment`,
+    )
+    return response.data
+  }
+
+  /**
+   * Get a single enrichment field by key.
+   *
+   * @see GET https://public.api.hospitable.com/v2/reservations/{uuid}/enrichment/{key}
+   */
+  async getEnrichment(uuid: string, key: string): Promise<EnrichmentField> {
+    return this.http.get<EnrichmentField>(
+      `/v2/reservations/${encodeURIComponent(uuid)}/enrichment/${encodeURIComponent(key)}`,
+    )
+  }
+
+  /**
+   * Update a single enrichment field. Pass `null` to clear the value.
+   *
+   * @see PUT https://public.api.hospitable.com/v2/reservations/{uuid}/enrichment/{key}
+   */
+  async updateEnrichment(uuid: string, key: string, value: string | null): Promise<EnrichmentField> {
+    return this.http.put<EnrichmentField>(
+      `/v2/reservations/${encodeURIComponent(uuid)}/enrichment/${encodeURIComponent(key)}`,
+      { value },
+    )
   }
 
   /** Drop the in-memory cache. Called automatically by the client on 401 re-auth. */

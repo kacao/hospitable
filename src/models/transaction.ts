@@ -46,6 +46,10 @@ export interface Transaction {
   date: string
   /** Start of the period this transaction covers, for range-based rows. */
   startDate: string | null
+  /** Populated when `include=payout` is requested. */
+  payout?: unknown
+  /** Populated when `include=reservation` is requested. */
+  reservation?: unknown
 }
 
 export type TransactionList = import('./pagination').PaginatedResponse<Transaction>

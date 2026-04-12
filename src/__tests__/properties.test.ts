@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { PropertiesResource } from '../resources/properties'
 import type { HttpClient } from '../http/client'
-import type { Property, PropertyImage, PropertyTag } from '../models/property'
+import type { Property, PropertyImage, PropertyIcalImport, PropertyTag } from '../models/property'
 import type { PaginatedResponse } from '../models/pagination'
+import { ConfigurationError, NotFoundError, ValidationError } from '../errors'
 import { makeHttpClient } from './helpers'
 
 const mockProperty: Property = {
@@ -368,6 +369,175 @@ describe('PropertiesResource', () => {
       expect(result.listings).toBeDefined()
       expect(result.details).toBeDefined()
       expect(result.bookings).toBeDefined()
+    })
+  })
+
+  describe('addTags()', () => {
+    it('calls POST /v2/properties/{id}/tags with tag array', async () => {
+      vi.mocked(http.post).mockResolvedValue(undefined)
+
+      await resource.addTags('prop-1', ['beach', 'pool'])
+
+      expect(http.post).toHaveBeenCalledWith(
+        '/v2/properties/prop-1/tags',
+        { tags: ['beach', 'pool'] },
+      )
+    })
+
+    it('throws ConfigurationError when tags array is empty', async () => {
+      await expect(resource.addTags('prop-1', [])).rejects.toBeInstanceOf(ConfigurationError)
+      expect(http.post).not.toHaveBeenCalled()
+    })
+
+    it('throws ConfigurationError when tags array exceeds 10 items', async () => {
+      const tags = Array.from({ length: 11 }, (_, i) => `tag-${i}`)
+      await expect(resource.addTags('prop-1', tags)).rejects.toBeInstanceOf(ConfigurationError)
+      expect(http.post).not.toHaveBeenCalled()
+    })
+
+    it('accepts exactly 10 tags', async () => {
+      vi.mocked(http.post).mockResolvedValue(undefined)
+      const tags = Array.from({ length: 10 }, (_, i) => `tag-${i}`)
+      await resource.addTags('prop-1', tags)
+      expect(http.post).toHaveBeenCalled()
+    })
+
+    it('accepts exactly 1 tag', async () => {
+      vi.mocked(http.post).mockResolvedValue(undefined)
+      await resource.addTags('prop-1', ['solo'])
+      expect(http.post).toHaveBeenCalled()
+    })
+
+    it('clears the cache after tagging', async () => {
+      const cachedHttp = makeHttpClient()
+      const cachedResource = new PropertiesResource(cachedHttp, { enabled: true, ttl: 60_000 })
+      vi.mocked(cachedHttp.get).mockResolvedValue({ data: mockProperty })
+      vi.mocked(cachedHttp.post).mockResolvedValue(undefined)
+
+      await cachedResource.get('prop-1')
+      await cachedResource.addTags('prop-1', ['beach'])
+      await cachedResource.get('prop-1')
+
+      expect(cachedHttp.get).toHaveBeenCalledTimes(2)
+    })
+
+    it('includes the method name in the ConfigurationError message', async () => {
+      const err = (await resource.addTags('prop-1', []).catch((e) => e)) as Error
+      expect(err.message).toContain('addTags')
+      expect(err.message).toContain('1-10')
+    })
+  })
+
+  describe('createQuote()', () => {
+    it('calls POST /v2/properties/{id}/quote with params', async () => {
+      vi.mocked(http.post).mockResolvedValue({ total: 50000 })
+
+      const result = await resource.createQuote('prop-1', {
+        checkinDate: '2026-06-01',
+        checkoutDate: '2026-06-05',
+        guests: { adults: 2 },
+      })
+
+      expect(http.post).toHaveBeenCalledWith(
+        '/v2/properties/prop-1/quote',
+        {
+          checkinDate: '2026-06-01',
+          checkoutDate: '2026-06-05',
+          guests: { adults: 2 },
+        },
+      )
+      expect(result).toEqual({ total: 50000 })
+    })
+  })
+
+  describe('createIcalImport()', () => {
+    const mockIcal: PropertyIcalImport = {
+      id: 'ical-1',
+      url: 'https://example.com/feed.ics',
+      name: 'External Calendar',
+      host: { firstName: 'Jane', lastName: 'Doe' },
+      lastSyncAt: '2026-04-11T18:40:13+00:00',
+      disconnectedAt: null,
+    }
+
+    it('calls POST /v2/properties/{id}/ical-imports and unwraps .data', async () => {
+      vi.mocked(http.post).mockResolvedValue({ data: mockIcal })
+
+      const result = await resource.createIcalImport('prop-1', 'https://example.com/feed.ics')
+
+      expect(http.post).toHaveBeenCalledWith(
+        '/v2/properties/prop-1/ical-imports',
+        { url: 'https://example.com/feed.ics' },
+      )
+      expect(result).toEqual(mockIcal)
+    })
+
+    it('passes optional name and host through', async () => {
+      vi.mocked(http.post).mockResolvedValue({ data: mockIcal })
+
+      await resource.createIcalImport('prop-1', 'https://example.com/feed.ics', {
+        name: 'My Calendar',
+        host: { firstName: 'Jane', lastName: 'Doe' },
+      })
+
+      expect(http.post).toHaveBeenCalledWith(
+        '/v2/properties/prop-1/ical-imports',
+        {
+          url: 'https://example.com/feed.ics',
+          name: 'My Calendar',
+          host: { firstName: 'Jane', lastName: 'Doe' },
+        },
+      )
+    })
+
+    it('propagates ValidationError on 422', async () => {
+      vi.mocked(http.post).mockRejectedValue(new ValidationError('Bad URL'))
+      await expect(
+        resource.createIcalImport('prop-1', 'not-a-url'),
+      ).rejects.toBeInstanceOf(ValidationError)
+    })
+  })
+
+  describe('updateIcalImport()', () => {
+    const mockIcal: PropertyIcalImport = {
+      id: 'ical-1',
+      url: 'https://example.com/updated.ics',
+      name: 'Updated Calendar',
+      host: { firstName: 'Jane', lastName: 'Doe' },
+      lastSyncAt: '2026-04-11T18:40:13+00:00',
+      disconnectedAt: null,
+    }
+
+    it('calls PUT /v2/properties/{id}/ical-imports/{icalUuid} and unwraps .data', async () => {
+      vi.mocked(http.put).mockResolvedValue({ data: mockIcal })
+
+      const result = await resource.updateIcalImport('prop-1', 'ical-1', {
+        url: 'https://example.com/updated.ics',
+      })
+
+      expect(http.put).toHaveBeenCalledWith(
+        '/v2/properties/prop-1/ical-imports/ical-1',
+        { url: 'https://example.com/updated.ics' },
+      )
+      expect(result).toEqual(mockIcal)
+    })
+
+    it('passes resync option', async () => {
+      vi.mocked(http.put).mockResolvedValue({ data: mockIcal })
+
+      await resource.updateIcalImport('prop-1', 'ical-1', { resync: true })
+
+      expect(http.put).toHaveBeenCalledWith(
+        '/v2/properties/prop-1/ical-imports/ical-1',
+        { resync: true },
+      )
+    })
+
+    it('propagates NotFoundError on 404', async () => {
+      vi.mocked(http.put).mockRejectedValue(new NotFoundError('Not found'))
+      await expect(
+        resource.updateIcalImport('prop-1', 'missing', { resync: true }),
+      ).rejects.toBeInstanceOf(NotFoundError)
     })
   })
 

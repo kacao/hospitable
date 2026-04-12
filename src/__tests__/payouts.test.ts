@@ -80,6 +80,37 @@ describe('PayoutsResource', () => {
     expect(params['page']).toBe(2)
   })
 
+  describe('get()', () => {
+    it('calls GET /v2/payouts/{uuid} and unwraps .data', async () => {
+      const p = makePayout({ id: 'payout-42' })
+      vi.mocked(http.get).mockResolvedValue({ data: p })
+
+      const result = await resource.get('payout-42')
+
+      expect(http.get).toHaveBeenCalledWith('/v2/payouts/payout-42', undefined)
+      expect(result).toEqual(p)
+    })
+
+    it('passes include param when provided', async () => {
+      vi.mocked(http.get).mockResolvedValue({ data: makePayout() })
+
+      await resource.get('payout-1', 'transactions')
+
+      expect(http.get).toHaveBeenCalledWith(
+        '/v2/payouts/payout-1',
+        { include: 'transactions' },
+      )
+    })
+
+    it('does not pass include when undefined', async () => {
+      vi.mocked(http.get).mockResolvedValue({ data: makePayout() })
+
+      await resource.get('payout-1')
+
+      expect(http.get).toHaveBeenCalledWith('/v2/payouts/payout-1', undefined)
+    })
+  })
+
   describe('error propagation', () => {
     it('throws AuthenticationError on 401', async () => {
       vi.mocked(http.get).mockRejectedValue(new AuthenticationError('Invalid token'))

@@ -30,6 +30,20 @@ export class TransactionsResource {
   }
 
   /**
+   * Fetch a single transaction by UUID.
+   *
+   * @see GET https://public.api.hospitable.com/v2/transactions/{uuid}
+   * @throws {NotFoundError} on 404
+   */
+  async get(uuid: string, include?: string): Promise<Transaction> {
+    const response = await this.http.get<{ data: Transaction }>(
+      `/v2/transactions/${encodeURIComponent(uuid)}`,
+      include ? { include } : undefined,
+    )
+    return response.data
+  }
+
+  /**
    * List financial transactions. Use `startDate`/`endDate` to scope to a
    * reporting window.
    *
