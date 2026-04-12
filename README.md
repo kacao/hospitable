@@ -337,13 +337,13 @@ interface Reservation {
   }>
 
   guests: ReservationGuests
-  guest?: Guest              // only when include=guest
-  user?: ReservationUser     // only when include=user
-  financials?: unknown       // only when include=financials
-  properties?: unknown[]     // only when include=properties
-  listings?: unknown[]       // only when include=listings
-  review?: unknown | null    // only when include=review
-  smartlockCode?: string | null   // only when include=smartlock_code; 4-digit numeric code or null
+  guest?: Guest                         // only when include=guest
+  user?: ReservationUser                // only when include=user
+  financials?: ReservationFinancials    // only when include=financials — see below
+  properties?: unknown[]                // only when include=properties
+  listings?: unknown[]                  // only when include=listings
+  review?: unknown | null               // only when include=review
+  smartlockCode?: string | null         // only when include=smartlock_code
 
   notes: string | null
   conversationId: string
@@ -352,6 +352,49 @@ interface Reservation {
   issueAlert: unknown
 }
 ```
+
+### `ReservationFinancials` (when `include=financials`)
+
+The financial breakdown splits into `guest` (what the guest pays) and
+`host` (what the host receives). Every line item shares the same shape,
+so narrowing is easy.
+
+```ts
+interface ReservationFinancialLineItem {
+  amount: number            // minor currency units; CAN BE NEGATIVE
+  formatted: string         // e.g. "$1,483.35" or "-$1,213.65"
+  label: string             // e.g. "Cleaning Fee", "Early Bird Discount"
+  category: string          // e.g. "Accommodation", "Guest fees", "Discounts"
+}
+
+interface ReservationFinancials {
+  currency: string          // ISO 4217
+  guest: {
+    accommodation: ReservationFinancialLineItem
+    averageNightlyRate: ReservationFinancialLineItem
+    fees: ReservationFinancialLineItem[]           // cleaning, pet, extra-guest
+    discounts: ReservationFinancialLineItem[]      // NEGATIVE amounts
+    taxes: ReservationFinancialLineItem[]
+    adjustments: ReservationFinancialLineItem[]
+    payments: ReservationFinancialLineItem[]
+    totalPrice: ReservationFinancialLineItem
+  }
+  host: {
+    accommodation: ReservationFinancialLineItem
+    accommodationBreakdown: ReservationFinancialLineItem[] | null  // per-night
+    guestFees: ReservationFinancialLineItem[]
+    hostFees: ReservationFinancialLineItem[]       // service fees — NEGATIVE
+    discounts: ReservationFinancialLineItem[]
+    adjustments: ReservationFinancialLineItem[]
+    taxes: ReservationFinancialLineItem[]
+    revenue: ReservationFinancialLineItem          // final host take-home
+  }
+}
+```
+
+⚠️ **`amount` can be negative.** Discounts and host-side service fees
+arrive as negative integers (e.g. `-121365` for a `-$1,213.65` Early
+Bird Discount). Don't assume positivity when summing or displaying.
 
 ### `Review`
 
@@ -454,6 +497,7 @@ interface Property {
   listings?: PropertyListing[]        // include=listings
   details?: PropertyDetails           // include=details
   bookings?: PropertyBookings         // include=bookings
+  icalImports?: PropertyIcalImport[]  // include=listings (bundled with listings)
 }
 
 interface PropertyUser {
@@ -489,8 +533,53 @@ interface PropertyDetails {
   wifiPassword: string | null         // passed through sanitize() unchanged
 }
 
-type PropertyBookings = unknown       // opaque; narrow at call site
+interface PropertyBookings {
+  fees: PropertyBookingFee[]          // { name, type, value: { amount, formatted } }
+  occupancyBasedRules: {
+    guestsIncluded: number
+    extraGuestFee: { type: string; value: { amount: number; formatted: string } }
+    petFee:        { type: string; value: { amount: number; formatted: string } }
+  }
+  discounts: unknown[]                // shape not yet observed populated
+  listingMarkups: Array<{
+    platform: string                  // 'airbnb' | 'vrbo' | ...
+    type: string                      // 'percentage' | 'flat'
+    markup: number
+  }>
+  securityDeposits: unknown[]         // shape not yet observed populated
+  securityDepositCollector: unknown | null
+  bookingPolicies: {
+    cancellation: string[]            // one line per rule/tier
+    paymentTerms: {
+      status: string                  // 'full_payment' | 'deposit_required' | ...
+      description: string[]
+      gracePeriod: number             // hours
+    }
+  }
+  siteUrls: string[]                  // where the listing is published
+}
+
+interface PropertyIcalImport {
+  id: string
+  url: string                         // ⚠️ effectively a credential — see below
+  name: string                        // display name
+  host: { firstName: string; lastName: string }
+  lastSyncAt: string                  // ISO 8601
+  disconnectedAt: string | null       // ISO 8601 or null if active
+}
 ```
+
+⚠️ **`icalImports[].url` is a shared secret.** iCal URLs embed an opaque
+auth token in the path — anyone holding one can read the calendar.
+`sanitize()` does NOT redact this field (`url` is too common a field
+name to blanket-mask). Handle it the way you'd handle any other
+credential in your logging/observability layer.
+
+⚠️ **`icalImports` is gated on `include=listings`** — undocumented but
+empirically verified. The field is absent (undefined) when `listings`
+isn't requested, because Hospitable bundles iCal imports into the
+"listings" conceptual subtree. Pass `include=listings` or
+`include=listings,user,details,bookings` to populate it.
 
 ### `User`
 
@@ -1000,7 +1089,10 @@ Property, PropertyList, PropertyTag, PropertyImage, PropertySearchParams,
   PropertyAddress, PropertyCapacity, PropertyHouseRules,
   PropertyRoomDetail, PropertyRoomBed, PropertyParentChild,
   PropertyIncludeField, PropertyUser, PropertyListing,
-  PropertyListingCoHost, PropertyDetails, PropertyBookings
+  PropertyListingCoHost, PropertyDetails, PropertyBookings,
+  PropertyBookingFee, PropertyListingMarkup, PropertyOccupancyFee,
+  PropertyOccupancyBasedRules, PropertyPaymentTerms,
+  PropertyBookingPolicies, PropertyIcalImport
 
 // Reservation models
 Reservation, ReservationList, ReservationListParams,
@@ -1008,6 +1100,8 @@ Reservation, ReservationList, ReservationListParams,
   ReservationPlatform, ReservationDateQuery, ReservationIncludeField,
   ReservationStatusObject, ReservationStatusHistoryEntry,
   ReservationLegacyStatusHistoryEntry, ReservationUser,
+  ReservationFinancials, ReservationFinancialsGuest,
+  ReservationFinancialsHost, ReservationFinancialLineItem,
   Guest, ReservationGuests, normalizeReservation
 
 // Inquiry models

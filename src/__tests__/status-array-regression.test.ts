@@ -319,6 +319,123 @@ describe('status array regression — integration', () => {
       expect(r2.data[0]!.statusHistory[0]!.status).toBe('cancelled')
     })
 
+    it('deserializes financials into the structured ReservationFinancials shape', async () => {
+      // Regression guard: prior to 0.5.4 financials was typed as
+      // `unknown`, so agents had no narrowing. This test pins the full
+      // structured shape after the deepSnakeToCamel layer runs.
+      const apiResponse = {
+        data: [{
+          id: 'res-with-financials',
+          code: 'HMT85ZHJQZ',
+          platform: 'airbnb',
+          platform_id: 'a1',
+          booking_date: '2026-01-01',
+          arrival_date: '2026-04-21',
+          departure_date: '2026-04-27',
+          check_in: '15:00',
+          check_out: '11:00',
+          nights: 6,
+          stay_type: 'guest',
+          owner_stay: null,
+          reservation_status: { current: { category: 'accepted', sub_category: null }, history: [] },
+          status: 'accepted',
+          status_history: [],
+          guests: { total: 2, adult_count: 2, child_count: 0, infant_count: 0, pet_count: 0 },
+          notes: null,
+          conversation_id: 'conv-1',
+          conversation_language: null,
+          last_message_at: null,
+          issue_alert: null,
+          financials: {
+            currency: 'USD',
+            guest: {
+              accommodation: {
+                amount: 148335,
+                formatted: '$1,483.35',
+                label: 'Accommodation',
+                category: 'Accommodation',
+              },
+              average_nightly_rate: {
+                amount: 24722,
+                formatted: '$247.22',
+                label: 'Average Nightly Rate',
+                category: 'Accommodation',
+              },
+              fees: [
+                { amount: 20100, formatted: '$201.00', label: 'Cleaning Fee', category: 'Guest fees' },
+              ],
+              discounts: [
+                { amount: -121365, formatted: '-$1,213.65', label: 'Early Bird Discount', category: 'Discounts' },
+              ],
+              taxes: [
+                { amount: 16844, formatted: '$168.44', label: 'Transient Occupancy Tax', category: 'Host Tax' },
+              ],
+              adjustments: [],
+              payments: [],
+              total_price: {
+                amount: 185279,
+                formatted: '$1,852.79',
+                label: 'Guest Total Price',
+                category: 'Guest total price',
+              },
+            },
+            host: {
+              accommodation: {
+                amount: 269700,
+                formatted: '$2,697.00',
+                label: 'Accommodation',
+                category: 'Accommodation',
+              },
+              accommodation_breakdown: [
+                { amount: 29200, formatted: '$292.00', label: '2026-04-21', category: 'Accommodation' },
+              ],
+              guest_fees: [],
+              host_fees: [
+                { amount: -26107, formatted: '-$261.07', label: 'Host Service Fee', category: 'Service fees' },
+              ],
+              discounts: [],
+              adjustments: [],
+              taxes: [],
+              revenue: {
+                amount: 122228,
+                formatted: '$1,222.28',
+                label: 'Revenue',
+                category: 'Revenue',
+              },
+            },
+          },
+        }],
+        meta: { current_page: 1, last_page: 1, per_page: 1, total: 1 },
+        links: { first: null, last: null, prev: null, next: null },
+      }
+      captureFetch(200, apiResponse)
+      const client = new HospitableClient({ token: 'test' })
+      const result = await client.reservations.list({
+        properties: ['p'],
+        include: 'financials',
+      })
+      const f = result.data[0]!.financials!
+
+      // Top-level narrowing works (previously this required a cast)
+      expect(f.currency).toBe('USD')
+      expect(f.guest.totalPrice.formatted).toBe('$1,852.79')
+      expect(f.guest.accommodation.amount).toBe(148335)
+      expect(f.guest.fees[0]!.label).toBe('Cleaning Fee')
+      expect(f.guest.discounts[0]!.amount).toBe(-121365) // negative amounts
+      expect(f.host.revenue.amount).toBe(122228)
+      expect(f.host.hostFees[0]!.amount).toBe(-26107) // negative service fee
+      expect(f.host.accommodationBreakdown).not.toBeNull()
+      expect(f.host.accommodationBreakdown![0]!.label).toBe('2026-04-21')
+
+      // snake_case -> camelCase conversion verified on nested fields:
+      // - average_nightly_rate -> averageNightlyRate
+      // - total_price -> totalPrice
+      // - accommodation_breakdown -> accommodationBreakdown
+      // - host_fees -> hostFees
+      // - guest_fees -> guestFees
+      expect(f.guest.averageNightlyRate.amount).toBe(24722)
+    })
+
     it('deserializes smartlock_code into camelCase smartlockCode', async () => {
       // Regression guard: the snake_case `smartlock_code` field name
       // from the API must be converted to `smartlockCode` on the

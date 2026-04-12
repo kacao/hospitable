@@ -164,19 +164,143 @@ export interface PropertyDetails {
 }
 
 /**
+ * A configurable fee on the property — appears in {@link PropertyBookings.fees}.
+ * Distinct from per-reservation fees which live on
+ * `Reservation.financials.guest.fees`.
+ */
+export interface PropertyBookingFee {
+  /** Human-readable fee name, e.g. `"Cleaning Fee"`, `"Resort Fee"`. */
+  name: string
+  /** Fee type, e.g. `"flat"`, `"percentage"`, `"per_night"`. Open string union. */
+  type: string
+  /** Configured value for the fee — either flat amount or percentage. */
+  value: {
+    /** Amount in minor currency units for flat fees, or raw percentage × 100 for percentage fees. */
+    amount: number
+    /** Pre-formatted display string, e.g. `"$201.00"` or `"5%"`. */
+    formatted: string
+  }
+}
+
+/**
+ * Per-platform price markup — how much the property charges above base
+ * rate on a specific channel. Appears in
+ * {@link PropertyBookings.listingMarkups}.
+ */
+export interface PropertyListingMarkup {
+  /** Booking platform, e.g. `"airbnb"`, `"vrbo"`, `"direct"`. */
+  platform: string
+  /** Markup type, e.g. `"percentage"`, `"flat"`. Open string union. */
+  type: string
+  /** Markup value — interpretation depends on `type`. */
+  markup: number
+}
+
+/**
+ * Extra-guest / pet fee configuration returned inside
+ * {@link PropertyBookings.occupancyBasedRules}.
+ */
+export interface PropertyOccupancyFee {
+  /** Fee type — typically `"per_night"` or `"flat"`. Open string union. */
+  type: string
+  value: {
+    amount: number
+    formatted: string
+  }
+}
+
+/**
+ * Occupancy-based pricing rules — what's included in the base rate and
+ * what costs extra beyond a threshold.
+ */
+export interface PropertyOccupancyBasedRules {
+  /** Number of guests included in the base rate. */
+  guestsIncluded: number
+  /** Fee charged per additional guest over `guestsIncluded`. */
+  extraGuestFee: PropertyOccupancyFee
+  /** Fee charged per pet (independent of guest count). */
+  petFee: PropertyOccupancyFee
+}
+
+/**
+ * Payment-term configuration returned inside
+ * {@link PropertyBookingPolicies.paymentTerms}.
+ */
+export interface PropertyPaymentTerms {
+  /** Payment status, e.g. `"full_payment"`, `"deposit_required"`. */
+  status: string
+  /** Human-readable description lines explaining the terms. */
+  description: string[]
+  /** Grace period in hours before payment is considered late. */
+  gracePeriod: number
+}
+
+/**
+ * Cancellation + payment policies attached to the property.
+ */
+export interface PropertyBookingPolicies {
+  /** Cancellation policy description lines — one per rule/tier. */
+  cancellation: string[]
+  paymentTerms: PropertyPaymentTerms
+}
+
+/**
  * Booking configuration returned when `include=bookings` is requested —
  * pricing policies, fees, discounts, and occupancy rules for the
- * property.
+ * property. Structured based on empirical probing of the live API; all
+ * fields are always present on the response (arrays may be empty).
  *
- * Shape is deliberately opaque (`unknown`) because it's a large and
- * loosely-structured configuration object that varies significantly by
- * platform and account type. Narrow with a type guard at the call site
- * if you need to read specific fields. Observed top-level keys include:
- * `bookingPolicies`, `discounts`, `fees`, `listingMarkups`,
- * `occupancyBasedRules`, `securityDepositCollector`, `securityDeposits`,
- * `siteUrls`.
+ * Fields like `discounts`, `securityDeposits`, and
+ * `securityDepositCollector` are typed as `unknown`/`unknown[]` because
+ * populated examples haven't been observed yet — narrow with a type
+ * guard at the call site if you encounter one.
  */
-export type PropertyBookings = unknown
+export interface PropertyBookings {
+  /** Configurable property-level fees. */
+  fees: PropertyBookingFee[]
+  /** Occupancy-based extra charges (extra guest, pet). */
+  occupancyBasedRules: PropertyOccupancyBasedRules
+  /** Available discounts. Shape not yet observed populated. */
+  discounts: unknown[]
+  /** Per-platform price markups. */
+  listingMarkups: PropertyListingMarkup[]
+  /** Security deposit definitions. Shape not yet observed populated. */
+  securityDeposits: unknown[]
+  /** Which party collects the security deposit. */
+  securityDepositCollector: unknown | null
+  bookingPolicies: PropertyBookingPolicies
+  /** URLs where this property is listed across platforms. */
+  siteUrls: string[]
+}
+
+/**
+ * An iCal feed imported from an external source — used to sync
+ * third-party calendar blocks (Airbnb, Crewdogs, Google Calendar, etc.)
+ * into Hospitable's unified calendar.
+ *
+ * ⚠️ **`url` is a shared secret.** iCal URLs from most platforms embed
+ * an opaque auth token in the path (`https://example.com/ical/<token>.ics`).
+ * Anyone holding the URL can read the full booking calendar. Don't log
+ * `icalImports[].url` to stdout in shared contexts and don't commit it
+ * to version control. The SDK's `sanitize()` does NOT redact this field
+ * because `url` is too common a field name to blanket-mask.
+ */
+export interface PropertyIcalImport {
+  id: string
+  /** The iCal feed URL — ⚠️ effectively a credential, see interface JSDoc. */
+  url: string
+  /** Display name for this import source. */
+  name: string
+  /** Host of the external calendar, if known. */
+  host: {
+    firstName: string
+    lastName: string
+  }
+  /** ISO 8601 timestamp of the most recent successful sync. */
+  lastSyncAt: string
+  /** ISO 8601 timestamp when the feed was disconnected, or `null` if active. */
+  disconnectedAt: string | null
+}
 
 export interface Property {
   id: string
@@ -206,6 +330,18 @@ export interface Property {
   houseRules: PropertyHouseRules
   /** Structured room layout. Not all properties populate this. */
   roomDetails: PropertyRoomDetail[]
+  /**
+   * External iCal feeds synced into this property's calendar.
+   *
+   * **Gated on `include=listings`** — this field is part of the
+   * listings bundle conceptually, so it's populated only when
+   * `include=listings` (or a multi-include that contains `listings`)
+   * is requested. Empirically verified against the live API; the
+   * Hospitable docs don't mention this gating.
+   *
+   * See {@link PropertyIcalImport} for the security caveat on `.url`.
+   */
+  icalImports?: PropertyIcalImport[]
   calendarRestricted: boolean
   /** Parent/child linkage for multi-unit listings. `null` for standalone. */
   parentChild: PropertyParentChild

@@ -86,6 +86,101 @@ export interface ReservationGuests {
 }
 
 /**
+ * A single line-item on a reservation's financial breakdown. Used by
+ * every entry inside the `guest` and `host` subsections of
+ * {@link ReservationFinancials} — accommodation, fees, discounts, taxes,
+ * adjustments, payments, and totals all share this exact shape.
+ *
+ * ⚠️ **`amount` can be negative** — discounts and host-side service
+ * fees arrive as negative integers (e.g. `-121365` for a
+ * `-$1,213.65` early-bird discount). Don't assume positivity.
+ */
+export interface ReservationFinancialLineItem {
+  /** Minor currency units (cents for USD). May be negative. */
+  amount: number
+  /** Pre-formatted display string, e.g. `"$1,483.35"` or `"-$1,213.65"`. */
+  formatted: string
+  /** Human-readable label, e.g. `"Cleaning Fee"`, `"Early Bird Discount"`. */
+  label: string
+  /**
+   * Grouping category. Values seen: `"Accommodation"`, `"Guest fees"`,
+   * `"Guest total price"`, `"Host Tax"`, `"Service fees"`, `"Discounts"`,
+   * `"Revenue"`. Open string union for forward compatibility.
+   */
+  category: string
+}
+
+/**
+ * Guest-facing financial breakdown — what the guest is shown and charged
+ * on the booking platform. Every sub-array is `[]` when no entries
+ * apply; arrays are never `null`.
+ */
+export interface ReservationFinancialsGuest {
+  /** Base room rate before fees/taxes/discounts. */
+  accommodation: ReservationFinancialLineItem
+  /** Accommodation amount divided by night count, for display. */
+  averageNightlyRate: ReservationFinancialLineItem
+  /** Guest-side fees (cleaning, pet, extra-guest, etc.). */
+  fees: ReservationFinancialLineItem[]
+  /** Guest-side discounts. Amounts are negative. */
+  discounts: ReservationFinancialLineItem[]
+  /** Taxes charged to the guest (occupancy, lodging, VAT, etc.). */
+  taxes: ReservationFinancialLineItem[]
+  /** Manual adjustments applied to the guest total. */
+  adjustments: ReservationFinancialLineItem[]
+  /** Payment records (typically populated post-stay). */
+  payments: ReservationFinancialLineItem[]
+  /** Final total charged to the guest. */
+  totalPrice: ReservationFinancialLineItem
+}
+
+/**
+ * Host-side financial breakdown — what the host earns after platform
+ * fees. This is the "revenue" side of the ledger.
+ */
+export interface ReservationFinancialsHost {
+  /** Base accommodation revenue. */
+  accommodation: ReservationFinancialLineItem
+  /**
+   * Per-day rate breakdown. `null` when the stay is a single flat rate;
+   * otherwise an array with one entry per night, labeled with the date.
+   */
+  accommodationBreakdown: ReservationFinancialLineItem[] | null
+  /** Fees collected from the guest and passed through to the host. */
+  guestFees: ReservationFinancialLineItem[]
+  /** Host-side service fees charged by the platform. Amounts typically negative. */
+  hostFees: ReservationFinancialLineItem[]
+  /** Host-side discounts (promotional, loyalty, etc.). Amounts negative. */
+  discounts: ReservationFinancialLineItem[]
+  /** Manual adjustments applied to host revenue. */
+  adjustments: ReservationFinancialLineItem[]
+  /** Taxes withheld from host revenue (rare — usually guest-side). */
+  taxes: ReservationFinancialLineItem[]
+  /** Final amount the host receives after all adjustments. */
+  revenue: ReservationFinancialLineItem
+}
+
+/**
+ * Full financial breakdown for a reservation. Returned when the
+ * `include=financials` query parameter is passed to the reservations
+ * list or get endpoint. Requires the `financials:read` OAuth2 scope on
+ * the access token.
+ *
+ * Split into `guest` (what the guest pays) and `host` (what the host
+ * receives). The two sides are reconciled via platform fees, taxes, and
+ * service charges — see {@link ReservationFinancialsHost.hostFees} for
+ * the platform's cut.
+ *
+ * @see GET https://public.api.hospitable.com/v2/reservations (include=financials)
+ */
+export interface ReservationFinancials {
+  /** ISO 4217 currency code (e.g. `"USD"`). */
+  currency: string
+  guest: ReservationFinancialsGuest
+  host: ReservationFinancialsHost
+}
+
+/**
  * Structured status object returned by the current API on the
  * `reservation_status` field. Carries both the current state and a full
  * history of transitions with sub-category detail the flat {@link
@@ -179,8 +274,11 @@ export interface Reservation {
   guest?: Guest
   /** Only populated when `include=user` is requested. */
   user?: ReservationUser
-  /** Only populated when `include=financials` is requested. */
-  financials?: unknown
+  /**
+   * Full financial breakdown. Populated only when `include=financials`
+   * is requested and the access token has the `financials:read` scope.
+   */
+  financials?: ReservationFinancials
   /** Only populated when `include=properties` is requested. */
   properties?: unknown[]
   /** Only populated when `include=listings` is requested. */

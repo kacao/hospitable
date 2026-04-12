@@ -247,22 +247,101 @@ describe('PropertiesResource', () => {
       expect(result.details!.wifiPassword).toBe('supersecret123')
     })
 
-    it('deserializes include=bookings as opaque (unknown)', async () => {
+    it('deserializes include=bookings into the structured PropertyBookings shape', async () => {
+      // Regression guard: as of 0.5.4, PropertyBookings is a concrete
+      // interface (not `unknown`). This test verifies every sub-field
+      // narrows correctly without a cast.
       const withBookings = {
         ...mockProperty,
         bookings: {
-          bookingPolicies: { minStay: 2 },
-          fees: [],
+          fees: [
+            {
+              name: 'Cleaning Fee',
+              type: 'flat',
+              value: { amount: 10000, formatted: '$100.00' },
+            },
+          ],
+          occupancyBasedRules: {
+            guestsIncluded: 2,
+            extraGuestFee: {
+              type: 'per_night',
+              value: { amount: 1000, formatted: '$10.00' },
+            },
+            petFee: {
+              type: 'flat',
+              value: { amount: 5000, formatted: '$50.00' },
+            },
+          },
           discounts: [],
+          listingMarkups: [
+            { platform: 'airbnb', type: 'percentage', markup: 10 },
+            { platform: 'vrbo', type: 'percentage', markup: 15 },
+          ],
+          securityDeposits: [],
+          securityDepositCollector: null,
+          bookingPolicies: {
+            cancellation: ['Flexible', 'Within 48h', 'Strict after'],
+            paymentTerms: {
+              status: 'full_payment',
+              description: ['Full payment required at booking'],
+              gracePeriod: 24,
+            },
+          },
+          siteUrls: ['https://airbnb.com/rooms/123', 'https://vrbo.com/456'],
         },
       }
       vi.mocked(http.get).mockResolvedValue({ data: withBookings })
       const result = await resource.get('prop-1', 'bookings')
-      // bookings is typed as unknown — narrow at the call site
-      expect(result.bookings).toBeDefined()
-      const b = result.bookings as { fees: unknown[]; discounts: unknown[] }
-      expect(b.fees).toEqual([])
-      expect(b.discounts).toEqual([])
+      const b = result.bookings!
+
+      expect(b.fees[0]!.name).toBe('Cleaning Fee')
+      expect(b.fees[0]!.value.amount).toBe(10000)
+      expect(b.occupancyBasedRules.guestsIncluded).toBe(2)
+      expect(b.occupancyBasedRules.extraGuestFee.type).toBe('per_night')
+      expect(b.listingMarkups).toHaveLength(2)
+      expect(b.listingMarkups[0]!.platform).toBe('airbnb')
+      expect(b.bookingPolicies.cancellation).toHaveLength(3)
+      expect(b.bookingPolicies.paymentTerms.gracePeriod).toBe(24)
+      expect(b.siteUrls).toContain('https://airbnb.com/rooms/123')
+    })
+
+    it('deserializes icalImports when include=listings is requested', async () => {
+      // Regression guard: icalImports is an UNDOCUMENTED side-effect
+      // of include=listings — empirically verified. The Hospitable
+      // docs don't mention this gating, but probing shows ical_imports
+      // appears on the response whenever include=listings is passed
+      // (directly or via a multi-include).
+      // Shape: {id, url, name, host{firstName, lastName}, lastSyncAt, disconnectedAt}.
+      const withImports = {
+        ...mockProperty,
+        icalImports: [
+          {
+            id: '0197b039-d99e-7120-85c4-5839eb956382',
+            url: 'https://www.crewdogs.com/ical/20250511173354823.ics',
+            name: 'Crewdogs Calendar',
+            host: { firstName: 'Crewdogs', lastName: 'Calendar' },
+            lastSyncAt: '2026-04-11T18:40:13+00:00',
+            disconnectedAt: null,
+          },
+        ],
+      }
+      vi.mocked(http.get).mockResolvedValue({ data: withImports })
+      const result = await resource.get('prop-1', 'listings')
+
+      expect(result.icalImports).toBeDefined()
+      expect(result.icalImports).toHaveLength(1)
+      expect(result.icalImports![0]!.name).toBe('Crewdogs Calendar')
+      expect(result.icalImports![0]!.url).toContain('ical/')
+      expect(result.icalImports![0]!.host.firstName).toBe('Crewdogs')
+      expect(result.icalImports![0]!.disconnectedAt).toBe(null)
+    })
+
+    it('icalImports is undefined when include=listings is not requested', async () => {
+      // The field is gated on include=listings. Without it, the API
+      // doesn't return the field at all — undefined, not empty array.
+      vi.mocked(http.get).mockResolvedValue({ data: mockProperty })
+      const result = await resource.get('prop-1')
+      expect(result.icalImports).toBeUndefined()
     })
 
     it('handles the combined include=user,listings,details,bookings', async () => {
