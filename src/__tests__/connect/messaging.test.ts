@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MessagingResource } from '../../connect/resources/messaging'
 import type { HttpClient } from '../../http/client'
 import type { ConnectPaginatedResponse, MessageTemplate } from '../../connect/models'
-import { ConfigurationError } from '../../errors'
+import {
+  ConfigurationError,
+  NotFoundError,
+  RateLimitError,
+  ValidationError,
+} from '../../errors'
 import { makeHttpClient } from '../helpers'
 
 const template: MessageTemplate = {
@@ -69,5 +74,52 @@ describe('MessagingResource', () => {
     const out: typeof template[] = []
     for await (const t of resource.iterTemplates()) out.push(t)
     expect(out).toEqual([template])
+  })
+
+  describe('failure and rate-limit (AGENTS.md triple)', () => {
+    it('listTemplates() propagates RateLimitError on 429', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(3))
+      await expect(resource.listTemplates()).rejects.toBeInstanceOf(RateLimitError)
+    })
+
+    it('listTemplates() propagates NotFoundError on 404', async () => {
+      vi.mocked(http.get).mockRejectedValue(new NotFoundError('route not found'))
+      await expect(resource.listTemplates()).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('getTemplate() propagates NotFoundError for missing template', async () => {
+      vi.mocked(http.get).mockRejectedValue(new NotFoundError('template not found'))
+      await expect(resource.getTemplate('ghost')).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('getTemplate() propagates RateLimitError on 429', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(4))
+      await expect(resource.getTemplate('tpl-1')).rejects.toBeInstanceOf(RateLimitError)
+    })
+
+    it('send() propagates ValidationError on 422 (placeholder mismatch)', async () => {
+      vi.mocked(http.post).mockRejectedValue(
+        new ValidationError('Placeholder mismatch', {
+          placeholders: ['missing required: name'],
+        }),
+      )
+      await expect(
+        resource.send('res-1', { templateId: 'tpl-1', placeholders: {} }),
+      ).rejects.toBeInstanceOf(ValidationError)
+    })
+
+    it('send() propagates NotFoundError on 404 (unknown reservation)', async () => {
+      vi.mocked(http.post).mockRejectedValue(new NotFoundError('reservation not found'))
+      await expect(
+        resource.send('ghost', { templateId: 'tpl-1', placeholders: { name: 'x' } }),
+      ).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('send() propagates RateLimitError on 429', async () => {
+      vi.mocked(http.post).mockRejectedValue(new RateLimitError(5))
+      await expect(
+        resource.send('res-1', { templateId: 'tpl-1', placeholders: { name: 'x' } }),
+      ).rejects.toMatchObject({ retryAfter: 5 })
+    })
   })
 })

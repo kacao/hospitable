@@ -82,4 +82,98 @@ describe('HospitableConnectClient', () => {
       globalThis.fetch = prev
     }
   })
+
+  describe('onTokenExpired (issue #42)', () => {
+    it('retries with a freshly-minted token when a 401 triggers onTokenExpired', async () => {
+      const onTokenExpired = vi.fn().mockResolvedValue('fresh-token')
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ message: 'expired' }), {
+            status: 401,
+            headers: { 'content-type': 'application/json' },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ data: [] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        )
+
+      const prev = globalThis.fetch
+      globalThis.fetch = fetchMock as unknown as typeof fetch
+      try {
+        const client = new HospitableConnectClient({
+          token: 'stale-token',
+          onTokenExpired,
+        })
+        await client.channels.list('cust-1')
+
+        expect(onTokenExpired).toHaveBeenCalledOnce()
+        expect(fetchMock).toHaveBeenCalledTimes(2)
+
+        const firstCallHeaders = (fetchMock.mock.calls[0]![1] as RequestInit).headers as Record<string, string>
+        const retryCallHeaders = (fetchMock.mock.calls[1]![1] as RequestInit).headers as Record<string, string>
+        expect(firstCallHeaders.Authorization).toBe('Bearer stale-token')
+        expect(retryCallHeaders.Authorization).toBe('Bearer fresh-token')
+      } finally {
+        globalThis.fetch = prev
+      }
+    })
+
+    it('persists the refreshed token across subsequent requests', async () => {
+      const onTokenExpired = vi.fn().mockResolvedValue('fresh-token')
+      const okResponse = () =>
+        new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ message: 'expired' }), {
+            status: 401,
+            headers: { 'content-type': 'application/json' },
+          }),
+        )
+        .mockResolvedValueOnce(okResponse())
+        .mockResolvedValueOnce(okResponse())
+
+      const prev = globalThis.fetch
+      globalThis.fetch = fetchMock as unknown as typeof fetch
+      try {
+        const client = new HospitableConnectClient({
+          token: 'stale-token',
+          onTokenExpired,
+        })
+        await client.channels.list('cust-1')
+        await client.channels.list('cust-2')
+
+        expect(onTokenExpired).toHaveBeenCalledOnce()
+        const secondRequestHeaders = (fetchMock.mock.calls[2]![1] as RequestInit).headers as Record<string, string>
+        expect(secondRequestHeaders.Authorization).toBe('Bearer fresh-token')
+      } finally {
+        globalThis.fetch = prev
+      }
+    })
+
+    it('leaves 401 as terminal when onTokenExpired is not supplied', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ message: 'expired' }), {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+      const prev = globalThis.fetch
+      globalThis.fetch = fetchMock as unknown as typeof fetch
+      try {
+        const client = new HospitableConnectClient({ token: 'stale-token' })
+        await expect(client.channels.list('cust-1')).rejects.toThrow()
+        expect(fetchMock).toHaveBeenCalledOnce()
+      } finally {
+        globalThis.fetch = prev
+      }
+    })
+  })
 })

@@ -251,6 +251,46 @@ describe('withRetry', () => {
     expect((err as RateLimitError).retryAfter).toBe(1)
   })
 
+  it('applies exponential backoff across attempts (issue #51)', async () => {
+    // Regression guard for AGENTS.md §Safety: backoff on 429 MUST be
+    // exponential, not linear. A prior test asserted jitter only (two
+    // runs produce different values), which a linear implementation
+    // would also pass. This one asserts delay growth across attempts.
+    const delays: number[] = []
+    const realSetTimeout = globalThis.setTimeout
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((cb: () => void, delay?: number) => {
+      delays.push(delay ?? 0)
+      return realSetTimeout(cb, 0)
+    }) as unknown as typeof globalThis.setTimeout)
+
+    // Fix Math.random() to 0.5 → jitter factor = 0.25 * (0.5*2 - 1) = 0
+    // So delay = exponential = baseDelay * 2^(attempt-1), with no jitter noise.
+    vi.spyOn(Math, 'random').mockReturnValue(0.5)
+
+    const fn = vi.fn()
+      .mockRejectedValueOnce(new FakeHttpError(500, 'boom'))
+      .mockRejectedValueOnce(new FakeHttpError(500, 'boom'))
+      .mockRejectedValueOnce(new FakeHttpError(500, 'boom'))
+      .mockResolvedValueOnce({ ok: true })
+
+    const promise = withRetry(fn, '/test', {
+      maxAttempts: 4,
+      baseDelay: 1000,
+      maxDelay: 60_000,
+    })
+    await vi.runAllTimersAsync()
+    await promise
+
+    expect(delays).toHaveLength(3)
+    // Expected (no jitter): 1000, 2000, 4000
+    expect(delays[0]).toBeCloseTo(1000, -1)
+    expect(delays[1]).toBeCloseTo(2000, -1)
+    expect(delays[2]).toBeCloseTo(4000, -1)
+    // Growth assertions independent of exact values — would fail linear (1000, 2000, 3000)
+    expect(delays[1]!).toBeGreaterThan(delays[0]! * 1.5)
+    expect(delays[2]!).toBeGreaterThan(delays[1]! * 1.5)
+  })
+
   it('onRateLimit fires on each 429 with incrementing attempt number', async () => {
     const onRateLimit = vi.fn()
     const fn = vi.fn()

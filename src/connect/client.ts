@@ -27,6 +27,25 @@ export interface HospitableConnectClientConfig {
   retry?: RetryConfig
   /** Enable debug logging. */
   debug?: boolean
+  /**
+   * Optional callback invoked when a 401 is returned by the API. Should
+   * resolve to a freshly-minted bearer token, which the SDK will swap in
+   * and use to transparently retry the failing request.
+   *
+   * Without this callback, 401s throw {@link AuthenticationError} and the
+   * caller must reconstruct the client — fine for short-lived scripts but
+   * a dead-end for long-running agent processes that rotate tokens
+   * mid-session. Supply it to cover that case.
+   *
+   * @example
+   * ```ts
+   * new HospitableConnectClient({
+   *   token: initialToken,
+   *   onTokenExpired: () => fetchFreshConnectToken(),
+   * })
+   * ```
+   */
+  onTokenExpired?: () => string | Promise<string>
 }
 
 /**
@@ -35,9 +54,11 @@ export interface HospitableConnectClientConfig {
  * host-facing).
  *
  * Auth is a static bearer token minted in the Hospitable Partner Portal;
- * there is no OAuth refresh loop. 401s surface as
- * {@link AuthenticationError} — regenerate the token in the portal and
- * reconstruct the client.
+ * there is no OAuth refresh loop. By default, 401s surface as
+ * {@link AuthenticationError} and are terminal — regenerate the token in
+ * the portal and reconstruct the client. Supply {@link HospitableConnectClientConfig.onTokenExpired}
+ * to plug in a custom refresh path (e.g. for long-running agents that
+ * rotate tokens via an external system).
  *
  * @see https://developer.hospitable.com/docs/connect-api-docs
  */
@@ -65,9 +86,21 @@ export class HospitableConnectClient {
       )
     }
 
+    // Hold the current token in a mutable ref so `onTokenExpired` can rotate
+    // it in place without reconstructing the client. `getAuthHeader` reads
+    // through the ref on every request.
+    let currentToken = token
+
     const http = new HttpClient({
       baseURL,
-      getAuthHeader: async () => `Bearer ${token}`,
+      getAuthHeader: async () => `Bearer ${currentToken}`,
+      ...(config.onTokenExpired !== undefined
+        ? {
+            onUnauthorized: async () => {
+              currentToken = await config.onTokenExpired!()
+            },
+          }
+        : {}),
       ...(config.debug !== undefined ? { debug: config.debug } : {}),
       ...(config.retry !== undefined ? { retryConfig: config.retry } : {}),
     })

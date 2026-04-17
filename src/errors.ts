@@ -13,10 +13,23 @@ export class HospitableError extends Error {
   }
 }
 
+/**
+ * Thrown on 401 and 403 responses. AGENTS.md §Error Handling spec mandates
+ * a single `HospitableAuthError` covering both. `ForbiddenError` extends
+ * this class so `err instanceof HospitableAuthError` catches 403 too.
+ *
+ * The trailing `statusCode` parameter exists so {@link ForbiddenError} can
+ * reuse the same constructor without duplicating the readonly-field dance.
+ * Callers should prefer {@link ForbiddenError} over `new AuthenticationError(…, 403)`.
+ */
 export class AuthenticationError extends HospitableError {
-  constructor(message = 'Authentication failed', requestId?: string) {
-    super(message, 401, requestId)
-    this.name = 'AuthenticationError'
+  constructor(
+    message = 'Authentication failed',
+    requestId?: string,
+    statusCode: 401 | 403 = 401,
+  ) {
+    super(message, statusCode, requestId)
+    this.name = 'HospitableAuthError'
   }
 }
 
@@ -25,7 +38,7 @@ export class RateLimitError extends HospitableError {
 
   constructor(retryAfter: number, requestId?: string) {
     super(`Rate limit exceeded. Retry after ${retryAfter}s`, 429, requestId)
-    this.name = 'RateLimitError'
+    this.name = 'HospitableRateLimitError'
     this.retryAfter = retryAfter
   }
 }
@@ -35,7 +48,7 @@ export class NotFoundError extends HospitableError {
 
   constructor(message = 'Resource not found', requestId?: string, resource?: string) {
     super(message, 404, requestId)
-    this.name = 'NotFoundError'
+    this.name = 'HospitableNotFoundError'
     this.resource = resource
   }
 }
@@ -45,15 +58,15 @@ export class ValidationError extends HospitableError {
 
   constructor(message: string, fields: Record<string, string[]> = {}, requestId?: string) {
     super(message, 422, requestId)
-    this.name = 'ValidationError'
+    this.name = 'HospitableValidationError'
     this.fields = fields
   }
 }
 
-export class ForbiddenError extends HospitableError {
+export class ForbiddenError extends AuthenticationError {
   constructor(message = 'Forbidden', requestId?: string) {
-    super(message, 403, requestId)
-    this.name = 'ForbiddenError'
+    super(message, requestId, 403)
+    this.name = 'HospitableForbiddenError'
   }
 }
 
@@ -62,7 +75,7 @@ export class ServerError extends HospitableError {
 
   constructor(message: string, statusCode: number, attempts: number, requestId?: string) {
     super(message, statusCode, requestId)
-    this.name = 'ServerError'
+    this.name = 'HospitableServerError'
     this.attempts = attempts
   }
 }
@@ -79,7 +92,7 @@ export class ServerError extends HospitableError {
 export class ConfigurationError extends HospitableError {
   constructor(message: string) {
     super(message, 0)
-    this.name = 'ConfigurationError'
+    this.name = 'HospitableConfigurationError'
   }
 }
 
@@ -101,20 +114,11 @@ export function createErrorFromResponse(
       return new NotFoundError(message, requestId)
     case 400:
     case 422: {
-      // Sanitize before storing on the error instance — the raw `errors`
-      // object can echo back guest PII (e.g. `body[name]: "Invalid: Jane"`)
-      // or business identity (`tax_id: "The tax id '12-3456789' is ..."`)
-      // and any consumer that logs the caught error via Sentry/winston
-      // would leak it. Sanitize at construction so the default code path
-      // never touches an unredacted error body.
       const rawErrors = (body['errors'] as Record<string, string[]> | undefined) ?? {}
       const errors = sanitize(rawErrors) as Record<string, string[]>
       return new ValidationError(message, errors, requestId)
     }
     case 429: {
-      // Prefer the HTTP `Retry-After` header (RFC 6585, threaded in via
-      // retryAfterOverride) over any JSON body field — the Hospitable API
-      // returns this as a header, not a body key.
       const retryAfter =
         retryAfterOverride ??
         (body['retryAfter'] as number | undefined) ??

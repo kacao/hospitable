@@ -29,6 +29,37 @@ const MULTI_VALUE_OPS = new Set<ConnectFilterOperator>(['is', 'not'])
 const SINGLE_VALUE_OPS = new Set<ConnectFilterOperator>(['lt', 'lte', 'gt', 'gte', 'before', 'after'])
 
 /**
+ * Allowlisted shape for field identifiers. Letters, digits, underscore,
+ * and dot (for nested paths like `financials.host`). Must start with a
+ * letter or underscore.
+ *
+ * Enforced on every `field` argument across `where`, `sortAsc`,
+ * `sortDesc`, and `select` to block two classes of defect:
+ *
+ * 1. **Log injection.** Without the guard, a field value containing
+ *    newlines / ANSI control codes flows into `ConfigurationError.message`
+ *    and then into any structured-log sink the caller uses (Sentry,
+ *    CloudWatch, etc.). AI agents composing filters from LLM output
+ *    are the realistic attack surface.
+ * 2. **Param-key corruption.** A field containing `]` or `[` would
+ *    produce a malformed `field[operator]` key that the API would reject
+ *    with an unhelpful 400 deep in the request pipeline.
+ *
+ * The error message deliberately does NOT echo the offending `field`
+ * value (that's the defect the guard is preventing).
+ */
+const FIELD_PATTERN = /^[A-Za-z_][\w.]*$/
+
+function assertValidField(field: string): void {
+  if (!FIELD_PATTERN.test(field)) {
+    throw new ConfigurationError(
+      `ConnectFilter: field name must match ${FIELD_PATTERN.source} ` +
+        '(letters, digits, underscore, dot; must start with a letter or underscore).',
+    )
+  }
+}
+
+/**
  * Fluent, immutable builder for Connect list params — composes
  * `field[operator]=value` filters, `sort[asc|desc]=field`, `_select=`,
  * and pagination (page / perPage).
@@ -71,6 +102,8 @@ export class ConnectFilter {
     operator: ConnectFilterOperator,
     value: string | number | boolean | Array<string | number | boolean>,
   ): ConnectFilter {
+    assertValidField(field)
+
     const stringified = Array.isArray(value)
       ? value.map(v => String(v)).join(',')
       : String(value)
@@ -94,8 +127,24 @@ export class ConnectFilter {
       if (Array.isArray(value)) {
         throw new ConfigurationError(
           `ConnectFilter.where: \`${operator}\` takes a single value — received an array. ` +
-            `Example: .where('${field}', '${operator}', '2024-02-01').`,
+            `Example: .where('<field>', '${operator}', '2024-02-01').`,
         )
+      }
+    }
+
+    // Comma is the multi-value delimiter on `is`, `not`, and `between`.
+    // A value containing a literal comma (e.g. 'San Francisco, CA') would
+    // silently split into two values when the API parses the query string,
+    // so reject it up front rather than producing an ambiguous filter.
+    if (Array.isArray(value) && (MULTI_VALUE_OPS.has(operator) || operator === 'between')) {
+      for (const v of value) {
+        if (typeof v === 'string' && v.includes(',')) {
+          throw new ConfigurationError(
+            `ConnectFilter.where: \`${operator}\` values cannot contain commas — ` +
+              'comma is the multi-value delimiter in the Connect query syntax. ' +
+              'Split the value into separate filters or normalize it before passing.',
+          )
+        }
       }
     }
 
@@ -107,6 +156,7 @@ export class ConnectFilter {
 
   /** Sort ascending by `field`. Replaces any prior sort. */
   sortAsc(field: string): ConnectFilter {
+    assertValidField(field)
     const next = this.stripSort()
     next[`sort[asc]`] = field
     return new ConnectFilter(next)
@@ -114,6 +164,7 @@ export class ConnectFilter {
 
   /** Sort descending by `field`. Replaces any prior sort. */
   sortDesc(field: string): ConnectFilter {
+    assertValidField(field)
     const next = this.stripSort()
     next[`sort[desc]`] = field
     return new ConnectFilter(next)
@@ -136,6 +187,7 @@ export class ConnectFilter {
   /** Request only a subset of response fields via `_select=a,b,c`. */
   select(...fields: string[]): ConnectFilter {
     if (fields.length === 0) return this
+    fields.forEach(assertValidField)
     return new ConnectFilter({ ...this.state, _select: fields.join(',') })
   }
 

@@ -7,6 +7,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 with the caveat that **while at 0.x, breaking changes land on the minor version**
 (standard npm semver for pre-1.0 libraries).
 
+## [Unreleased]
+
+Post-release review hardening. Fourteen issues opened against the 0.7.0
+audit (`#42`–`#55`) are all resolved on this branch. No Public-API
+breaking changes; the Connect surface gains two additions
+(`onTokenExpired`, `verifyWebhookSignature`) and a tightened filter-bag
+type. Error `.name` strings are now the `Hospitable*` spec names — code
+that routes on `instanceof` continues to work, code that routes on
+literal `err.name === 'AuthenticationError'` needs to update the string.
+
+### ✨ Added
+
+- **`HospitableConnectClientConfig.onTokenExpired`** (`#42`) — optional
+  callback invoked on a 401 to mint a fresh token. The SDK swaps the
+  token and transparently retries the failing request. Without this
+  hook, 401 remains terminal (previous behavior).
+- **`verifyWebhookSignature`** (`#43`) — HMAC-SHA256 verification helper
+  for incoming Connect webhooks. Uses `crypto.timingSafeEqual`; supports
+  `sha1`/`sha256`, hex/base64 headers, `algo=`-prefixed headers, and an
+  optional timestamped scheme with `toleranceSeconds` anti-replay. Never
+  throws on mismatch (DoS guard); returns `false`. Exported from the
+  `Connect` namespace.
+- **`HospitableForbiddenError`, `HospitableNotFoundError`,
+  `HospitableConfigurationError`** — new `Hospitable*` aliases for the
+  corresponding error classes. `HospitableAuthError` now catches 403
+  too; see below.
+- **`TokenManagerConfig.expiresIn`** (`#54`) — optional TTL (in seconds)
+  for a caller-supplied `token + refreshToken`. Default is 3600 (was a
+  hardcoded 60-second TTL). Pass `expiresIn: 0` to force an immediate
+  refresh on the first request.
+- **`Connect.collectAll`** (`#50`) — re-export of the pagination
+  drain helper for namespace symmetry.
+
+### 🐛 Fixed
+
+- **`HospitableAuthError` covers 403** (`#45`) — `ForbiddenError` now
+  extends `AuthenticationError`, so `err instanceof HospitableAuthError`
+  catches both 401 and 403 per AGENTS.md spec. `ForbiddenError` keeps
+  its own class for fine-grained routing.
+- **Error `.name` matches the spec alias** (`#46`) — every error class
+  now reports its `Hospitable*` name:
+  `HospitableAuthError`, `HospitableRateLimitError`,
+  `HospitableNotFoundError`, `HospitableValidationError`,
+  `HospitableForbiddenError`, `HospitableServerError`,
+  `HospitableConfigurationError`. `HospitableError` base unchanged.
+  **Breaking only for code that compared `err.name` to the old short
+  strings.** Use `instanceof` (recommended) or update the string.
+- **`ConnectFilter.where(field, …)` validates `field`** (`#48`) — field
+  names must match `/^[A-Za-z_][\w.]*$/`. Rejects newlines, ANSI
+  escapes, brackets, ampersands — blocking a log-injection path where
+  a hostile `field` value flowed into `ConfigurationError.message`. Same
+  guard applies to `sortAsc`, `sortDesc`, and `select`.
+- **`ConnectFilter.where` rejects commas in multi-value operators**
+  (`#52`) — `is`/`not`/`between` values containing a literal comma
+  previously produced ambiguous `field[is]=a,b` serialization. Now
+  throw `ConfigurationError` up front so callers can split or
+  normalize explicitly.
+- **Connect `*ListParams` no longer accept `string[]` at the index
+  signature** (`#49`) — tightening `ReservationListParams`,
+  `ReviewListParams`, `TransactionListParams`, `PayoutListParams`, and
+  `ResolutionListParams`. Stops a compile-time path where
+  `params.page = ['oops']` was accepted via the open index, then silently
+  produced NaN in `paginateConnect`.
+- **`TokenManager` no longer force-refreshes caller-supplied tokens
+  after 60s** (`#54`) — the default TTL is now 3600 seconds.
+
+### 🔒 Security
+
+- **Webhook signature verification** (`#43`) — see Added above. Before
+  this release, consumers were relying on the payload type guards
+  (`isConnectWebhookAction`, `isConnectWebhookFamily`) for structural
+  narrowing only, with no cryptographic authentication. Production
+  integrations must call `verifyWebhookSignature` before trusting the
+  body.
+- **Examples no longer log guest PII** (`#47`) — every sample script
+  under `examples/` now masks guest names / emails per AGENTS.md
+  §Safety. Copy-paste patterns are now PII-safe by default.
+- **`ConnectFilter` log-injection guard** (`#48`) — see Fixed above.
+
+### 🧪 Tests
+
+- **Connect AGENTS.md TDD triple** (`#44`) — every endpoint across the
+  10 Connect resources now has success, failure, and rate-limit tests.
+  Closes a gap where 10 of the 14 new Connect suites were success-only.
+- **Exponential-backoff growth assertion** (`#51`) — new test verifies
+  that `withRetry` delay grows geometrically across attempts, closing a
+  gap where a linear-backoff regression would have passed.
+- **Realistic webhook payload fixtures** (`#53`) — per-family payloads
+  replace the empty `{} as T['data']` casts. Type-guard narrowing is
+  now exercised through real field access, not incidentally.
+- **URL-keyed mocks in 401-refresh test** (`#55`) — `client.test.ts`
+  routes mock responses by URL pattern instead of call-count arithmetic.
+
 ## [0.7.0] — 2026-04-16
 
 Adds full **Hospitable Connect API** support alongside the existing

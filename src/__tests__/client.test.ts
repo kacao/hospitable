@@ -126,42 +126,51 @@ describe('HospitableClient', () => {
   })
 
   it('a 401 from the API triggers token refresh and retries the request', async () => {
-    // When token+refreshToken+clientId+clientSecret are all provided, TokenManager
-    // treats the initial token as needing immediate refresh (expiresAt = now+60s,
-    // needsRefresh = now >= now). So the actual call order is:
-    //   call 1: /oauth/token (pre-call refresh)
-    //   call 2: API request → 401
-    //   call 3: /oauth/token (onUnauthorized refresh)
-    //   call 4: API retry → 200
-    let callCount = 0
-    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
-      callCount++
-      if (url.includes('/oauth/token')) {
-        // Token refresh calls always succeed
-        return Promise.resolve({
-          ok: true, status: 200,
-          headers: new Headers(),
-          json: async () => ({ access_token: 'new-token', expires_in: 3600, token_type: 'Bearer' }),
-          text: async () => '',
-        })
-      }
-      // First API call → 401; subsequent API calls → 200
-      const apiCallNumber = callCount - (callCount > 2 ? 2 : 1)
-      if (apiCallNumber === 1) {
-        return Promise.resolve({
-          ok: false, status: 401,
-          headers: new Headers(),
-          json: async () => ({ message: 'Unauthorized' }),
-          text: async () => 'Unauthorized',
-        })
-      }
-      return Promise.resolve({
-        ok: true, status: 200,
-        headers: new Headers({ 'Content-Type': 'application/json' }),
-        json: async () => ({ data: [], meta: { currentPage: 1, lastPage: 1, perPage: 10, total: 0 }, links: { first: null, last: null, prev: null, next: null } }),
-        text: async () => '',
-      })
-    }))
+    // URL-keyed routing (issue #55) — decouples test expectations from call
+    // ordering. Prior implementation counted calls and did conditional
+    // arithmetic to distinguish token vs. API paths, which silently broke
+    // when the refresh cadence changed. Route by URL pattern instead.
+    const okPropsResponse = () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      json: async () => ({
+        data: [],
+        meta: { currentPage: 1, lastPage: 1, perPage: 10, total: 0 },
+        links: { first: null, last: null, prev: null, next: null },
+      }),
+      text: async () => '',
+    })
+    const tokenRefreshResponse = () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({ access_token: 'new-token', expires_in: 3600, token_type: 'Bearer' }),
+      text: async () => '',
+    })
+    const unauthorizedResponse = () => ({
+      ok: false,
+      status: 401,
+      headers: new Headers(),
+      json: async () => ({ message: 'Unauthorized' }),
+      text: async () => 'Unauthorized',
+    })
+
+    // First properties call → 401 to trigger the refresh/retry cycle.
+    // All subsequent properties calls → 200.
+    const propsCall = vi.fn()
+      .mockImplementationOnce(unauthorizedResponse)
+      .mockImplementation(okPropsResponse)
+    const tokenCall = vi.fn().mockImplementation(tokenRefreshResponse)
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (url.includes('/oauth/token')) return Promise.resolve(tokenCall())
+        if (url.includes('/properties')) return Promise.resolve(propsCall())
+        throw new Error(`unexpected fetch URL: ${url}`)
+      }),
+    )
 
     const client = new HospitableClient({
       token: 'old-token',
@@ -172,7 +181,10 @@ describe('HospitableClient', () => {
 
     const result = await client.properties.list()
     expect(result.data).toEqual([])
-    // 1 pre-call token refresh + 1 API call (401) + 1 onUnauthorized token refresh + 1 API retry
-    expect(callCount).toBe(4)
+    // Route-level expectations — not order-dependent:
+    // - 2 properties requests (first 401, then 200 retry)
+    // - 1 token refresh triggered by onUnauthorized
+    expect(propsCall).toHaveBeenCalledTimes(2)
+    expect(tokenCall).toHaveBeenCalledTimes(1)
   })
 })

@@ -3,6 +3,7 @@ import { ReservationsResource } from '../../connect/resources/reservations'
 import type { HttpClient } from '../../http/client'
 import type { ConnectPaginatedResponse, Reservation } from '../../connect/models'
 import { makeHttpClient } from '../helpers'
+import { NotFoundError, RateLimitError } from '../../errors'
 
 const reservation = { id: 'res-1' } as unknown as Reservation
 
@@ -82,5 +83,47 @@ describe('ReservationsResource', () => {
         'status[not]': 'deny,cancelled',
       }),
     )
+  })
+
+  describe('failure and rate-limit (AGENTS.md triple)', () => {
+    it('listByListing() propagates NotFoundError when listing missing', async () => {
+      vi.mocked(http.get).mockRejectedValue(new NotFoundError('listing not found'))
+      await expect(resource.listByListing('ghost')).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('listByListing() propagates RateLimitError on 429', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(3))
+      await expect(resource.listByListing('lst-1')).rejects.toBeInstanceOf(RateLimitError)
+    })
+
+    it('getByListing() propagates NotFoundError for stale reservation id', async () => {
+      vi.mocked(http.get).mockRejectedValue(new NotFoundError('reservation not found'))
+      await expect(resource.getByListing('lst-1', 'ghost')).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('getByListing() propagates RateLimitError on 429', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(7))
+      await expect(resource.getByListing('lst-1', 'res-1')).rejects.toBeInstanceOf(RateLimitError)
+    })
+
+    it('listByCustomer() propagates NotFoundError when customer missing', async () => {
+      vi.mocked(http.get).mockRejectedValue(new NotFoundError('customer not found'))
+      await expect(resource.listByCustomer('ghost')).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('listByCustomer() propagates RateLimitError on 429', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(2))
+      await expect(resource.listByCustomer('cust-1')).rejects.toBeInstanceOf(RateLimitError)
+    })
+
+    it('getByCustomer() propagates NotFoundError for unknown reservation', async () => {
+      vi.mocked(http.get).mockRejectedValue(new NotFoundError('reservation not found'))
+      await expect(resource.getByCustomer('cust-1', 'ghost')).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('getByCustomer() propagates RateLimitError on 429', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(6))
+      await expect(resource.getByCustomer('cust-1', 'res-1')).rejects.toBeInstanceOf(RateLimitError)
+    })
   })
 })

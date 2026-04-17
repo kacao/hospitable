@@ -3,6 +3,7 @@ import { ChannelsResource } from '../../connect/resources/channels'
 import type { HttpClient } from '../../http/client'
 import type { Channel, Listing } from '../../connect/models'
 import { makeHttpClient } from '../helpers'
+import { NotFoundError, RateLimitError, AuthenticationError } from '../../errors'
 
 const channel: Channel = {
   id: 'ch-1',
@@ -59,5 +60,57 @@ describe('ChannelsResource', () => {
     const result = await resource.getListing('ch-1', 'lst-1')
     expect(http.get).toHaveBeenCalledWith('/channels/ch-1/listings/lst-1')
     expect(result).toEqual(listing)
+  })
+
+  describe('failure and rate-limit (AGENTS.md triple)', () => {
+    it('list() propagates AuthenticationError on 401', async () => {
+      vi.mocked(http.get).mockRejectedValue(new AuthenticationError('no creds'))
+      await expect(resource.list('cust-1')).rejects.toBeInstanceOf(AuthenticationError)
+    })
+
+    it('list() propagates RateLimitError on 429', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(3))
+      await expect(resource.list('cust-1')).rejects.toMatchObject({ statusCode: 429, retryAfter: 3 })
+    })
+
+    it('get() propagates NotFoundError for unknown channel', async () => {
+      vi.mocked(http.get).mockRejectedValue(new NotFoundError('channel not found'))
+      await expect(resource.get('cust-1', 'ghost')).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('get() propagates RateLimitError on 429', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(5))
+      await expect(resource.get('cust-1', 'ch-1')).rejects.toBeInstanceOf(RateLimitError)
+    })
+
+    it('delete() propagates NotFoundError when channel missing', async () => {
+      vi.mocked(http.delete).mockRejectedValue(new NotFoundError('channel not found'))
+      await expect(resource.delete('cust-1', 'ghost')).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('delete() propagates RateLimitError on 429', async () => {
+      vi.mocked(http.delete).mockRejectedValue(new RateLimitError(10))
+      await expect(resource.delete('cust-1', 'ch-1')).rejects.toBeInstanceOf(RateLimitError)
+    })
+
+    it('listListings() propagates NotFoundError when channel missing', async () => {
+      vi.mocked(http.get).mockRejectedValue(new NotFoundError('channel not found'))
+      await expect(resource.listListings('ghost')).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('listListings() propagates RateLimitError on 429', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(2))
+      await expect(resource.listListings('ch-1')).rejects.toBeInstanceOf(RateLimitError)
+    })
+
+    it('getListing() propagates NotFoundError for unknown listing', async () => {
+      vi.mocked(http.get).mockRejectedValue(new NotFoundError('listing not found'))
+      await expect(resource.getListing('ch-1', 'ghost')).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('getListing() propagates RateLimitError on 429', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(4))
+      await expect(resource.getListing('ch-1', 'lst-1')).rejects.toBeInstanceOf(RateLimitError)
+    })
   })
 })

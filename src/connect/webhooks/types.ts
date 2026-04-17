@@ -14,6 +14,13 @@ import type { Customer } from '../models/customer'
  *
  * Return 200 to acknowledge receipt — the platform retries on any
  * non-2xx response.
+ *
+ * ⚠️  **Security.** The type guards ({@link isConnectWebhookAction},
+ * {@link isConnectWebhookFamily}) only narrow the shape — they do NOT
+ * authenticate the sender. Anyone who discovers your webhook URL can POST
+ * a forged body that passes both guards. Before trusting any incoming
+ * payload, verify its HMAC signature with {@link verifyWebhookSignature}
+ * using the shared secret from your Hospitable integration.
  */
 export interface ConnectWebhookEnvelope<Action extends string, Data> {
   id: string

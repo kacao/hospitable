@@ -28,11 +28,16 @@ export {
 
 // Aliases mandated by AGENTS.md — existing short names are retained for
 // backward compatibility; these let consumers catch by the spec names.
+// `ForbiddenError extends AuthenticationError`, so `instanceof HospitableAuthError`
+// catches both 401 and 403 per the AGENTS.md spec.
 export {
   AuthenticationError as HospitableAuthError,
+  ForbiddenError as HospitableForbiddenError,
   RateLimitError as HospitableRateLimitError,
+  NotFoundError as HospitableNotFoundError,
   ValidationError as HospitableValidationError,
   ServerError as HospitableServerError,
+  ConfigurationError as HospitableConfigurationError,
 } from './errors'
 
 export * from './models/index'
