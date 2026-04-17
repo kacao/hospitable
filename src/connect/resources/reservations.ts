@@ -12,8 +12,15 @@ export interface ReservationListParams {
    * by `arrival_date[after]=2026-01-01` pass
    * `{ 'arrival_date[after]': '2026-01-01' }`. Use `ConnectFilter` for
    * a typed builder.
+   *
+   * Value type intentionally excludes `string[]`: Connect's filter
+   * serialization is comma-joined strings (see `ConnectFilter.where`),
+   * so arrays should be pre-joined before hitting this bag. Allowing
+   * `string[]` here also accidentally satisfied the numeric `page` /
+   * `perPage` slots at compile time, producing silent `NaN` paginator
+   * loops — see issue #49.
    */
-  [key: string]: string | number | boolean | string[] | undefined
+  [key: string]: string | number | boolean | undefined
 }
 
 /**

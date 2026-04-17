@@ -7,7 +7,12 @@ import type {
   Listing,
   ListingImage,
 } from '../../connect/models'
-import { ConfigurationError } from '../../errors'
+import {
+  ConfigurationError,
+  NotFoundError,
+  RateLimitError,
+  ValidationError,
+} from '../../errors'
 import { makeHttpClient } from '../helpers'
 
 const listing = { id: 'lst-1' } as unknown as Listing
@@ -90,5 +95,67 @@ describe('ListingsResource', () => {
     const collected: Listing[] = []
     for await (const l of resource.iter('cust-1')) collected.push(l)
     expect(collected).toEqual([listing])
+  })
+
+  describe('failure and rate-limit (AGENTS.md triple)', () => {
+    it('list() propagates NotFoundError when customer missing', async () => {
+      vi.mocked(http.get).mockRejectedValue(new NotFoundError('customer not found'))
+      await expect(resource.list('ghost')).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('list() propagates RateLimitError on 429', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(5))
+      await expect(resource.list('cust-1')).rejects.toBeInstanceOf(RateLimitError)
+    })
+
+    it('get() propagates NotFoundError for unknown listing', async () => {
+      vi.mocked(http.get).mockRejectedValue(new NotFoundError('listing not found'))
+      await expect(resource.get('cust-1', 'ghost')).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('get() propagates RateLimitError on 429', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(2))
+      await expect(resource.get('cust-1', 'lst-1')).rejects.toBeInstanceOf(RateLimitError)
+    })
+
+    it('getImages() propagates NotFoundError for unknown listing', async () => {
+      vi.mocked(http.get).mockRejectedValue(new NotFoundError('listing not found'))
+      await expect(resource.getImages('cust-1', 'ghost')).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('getImages() propagates RateLimitError on 429', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(3))
+      await expect(resource.getImages('cust-1', 'lst-1')).rejects.toBeInstanceOf(RateLimitError)
+    })
+
+    it('getCalendar() propagates NotFoundError for unknown listing', async () => {
+      vi.mocked(http.get).mockRejectedValue(new NotFoundError('listing not found'))
+      await expect(
+        resource.getCalendar('ghost', { startDate: '2026-01-01', endDate: '2026-01-31' }),
+      ).rejects.toBeInstanceOf(NotFoundError)
+    })
+
+    it('getCalendar() propagates RateLimitError on 429', async () => {
+      vi.mocked(http.get).mockRejectedValue(new RateLimitError(4))
+      await expect(
+        resource.getCalendar('lst-1', { startDate: '2026-01-01', endDate: '2026-01-31' }),
+      ).rejects.toBeInstanceOf(RateLimitError)
+    })
+
+    it('updateCalendar() propagates ValidationError on bad day payload', async () => {
+      vi.mocked(http.put).mockRejectedValue(
+        new ValidationError('Invalid payload', { 'days.0.date': ['must be YYYY-MM-DD'] }),
+      )
+      await expect(
+        resource.updateCalendar('lst-1', [{ date: 'bogus' } as unknown as never]),
+      ).rejects.toBeInstanceOf(ValidationError)
+    })
+
+    it('updateCalendar() propagates RateLimitError on 429', async () => {
+      vi.mocked(http.put).mockRejectedValue(new RateLimitError(6))
+      await expect(
+        resource.updateCalendar('lst-1', [{ date: '2026-01-01' }]),
+      ).rejects.toBeInstanceOf(RateLimitError)
+    })
   })
 })

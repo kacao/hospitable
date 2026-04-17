@@ -21,3 +21,10 @@ export type {
 } from './types'
 
 export { isConnectWebhookAction, isConnectWebhookFamily } from './types'
+
+export { verifyWebhookSignature } from './verify'
+export type {
+  VerifyWebhookSignatureOptions,
+  WebhookSignatureAlgorithm,
+  WebhookSignatureEncoding,
+} from './verify'

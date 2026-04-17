@@ -96,7 +96,7 @@ describe('TokenManager', () => {
       )
     })
 
-    it('4. refreshes when expiresAt is in the past', async () => {
+    it('4. refreshes when caller signals a stale token via expiresIn', async () => {
       const mockFetch = makeFetchMock({
         ok: true,
         json: () => Promise.resolve(makeTokenResponse({ expires_in: -1 })),
@@ -109,12 +109,9 @@ describe('TokenManager', () => {
         clientId: 'client-id',
         clientSecret: 'client-secret',
         baseURL: 'https://api.hospitable.com',
+        expiresIn: 0,
       })
 
-      // Force expiresAt to the past by getting auth header first time
-      // The constructor sets expiresAt = Date.now() + 60_000 for OAuth mode
-      // but needsRefresh checks Date.now() >= expiresAt - 60_000
-      // So with expiresAt = now + 60_000, needsRefresh = now >= now = true
       const header = await tm.getAuthHeader()
 
       expect(mockFetch).toHaveBeenCalledOnce()
@@ -122,6 +119,28 @@ describe('TokenManager', () => {
       const body = (mockFetch.mock.calls[0] as [string, RequestInit])[1].body as string
       expect(body).toContain('grant_type=refresh_token')
       expect(body).toContain('refresh_token=old-refresh')
+    })
+
+    it('4b. assumes caller-supplied token is fresh by default (no refresh on first use)', async () => {
+      // Regression guard for #54: prior to the fix, expiresAt was hardcoded
+      // to now+60_000, which combined with the 60-second refresh margin in
+      // needsRefresh() caused an immediate refresh on the very first call.
+      // With the 3600-second default, the token is trusted until it ages out.
+      const mockFetch = vi.fn()
+      vi.stubGlobal('fetch', mockFetch)
+
+      const tm = new TokenManager({
+        token: 'fresh-token',
+        refreshToken: 'some-refresh',
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        baseURL: 'https://api.hospitable.com',
+      })
+
+      const header = await tm.getAuthHeader()
+
+      expect(header).toBe('Bearer fresh-token')
+      expect(mockFetch).not.toHaveBeenCalled()
     })
 
     it('5. deduplicates concurrent refresh calls — fetch called only once', async () => {
@@ -231,6 +250,9 @@ describe('TokenManager', () => {
         clientId: 'client-id',
         clientSecret: 'client-secret',
         baseURL: 'https://api.hospitable.com',
+        // Mark the provided token as stale so the first getAuthHeader
+        // call triggers an immediate refresh (the scenario under test).
+        expiresIn: 0,
       })
 
       // First call: refresh using initial-refresh, server returns new-refresh-token

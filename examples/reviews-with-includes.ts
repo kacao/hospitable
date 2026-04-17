@@ -26,7 +26,9 @@ for (const property of properties) {
   console.log(`Reviewed: ${review.reviewedAt}`)
 
   if (review.guest) {
-    console.log(`Guest:    ${review.guest.firstName} ${review.guest.lastName} (${review.guest.language})`)
+    // AGENTS.md §Safety: guest names are PII — log only the non-identifying
+    // locale so copy-pasters don't ship this pattern into production.
+    console.log(`Guest:    <redacted> (${review.guest.language})`)
   }
   if (review.reservation) {
     console.log(

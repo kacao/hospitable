@@ -104,4 +104,82 @@ describe('ConnectFilter', () => {
     expect(branchB.toParams().per_page).toBe('20')
     expect(base.toParams()).not.toHaveProperty('per_page')
   })
+
+  describe('field-name validation (issue #48)', () => {
+    it.each([
+      ['newline', 'status\nadmin'],
+      ['ansi escape', 'status\u001b[31m'],
+      ['bracket', 'status]foo['],
+      ['ampersand', 'status&admin=1'],
+      ['leading digit', '1status'],
+      ['empty string', ''],
+      ['whitespace', 'status field'],
+      ['semicolon', 'status;drop'],
+    ])('rejects %s in where() field', (_label, field) => {
+      expect(() => new ConnectFilter().where(field, 'is', ['x'])).toThrow(ConfigurationError)
+    })
+
+    it('does not echo the offending field in the error message', () => {
+      // Log-injection guard: if the field had an ANSI escape or newline,
+      // we must not flow it through ConfigurationError.message into logs.
+      const nasty = 'nasty\u001b[31m\nINJECTED'
+      try {
+        new ConnectFilter().where(nasty, 'is', ['x'])
+        throw new Error('expected ConfigurationError')
+      } catch (err) {
+        expect(err).toBeInstanceOf(ConfigurationError)
+        expect((err as Error).message).not.toContain('INJECTED')
+        expect((err as Error).message).not.toContain('\u001b')
+      }
+    })
+
+    it('accepts valid field names including nested paths', () => {
+      expect(() =>
+        new ConnectFilter().where('financials.host.amount', 'gte', 100),
+      ).not.toThrow()
+      expect(() => new ConnectFilter().where('_select', 'is', ['a'])).not.toThrow()
+      expect(() => new ConnectFilter().where('status', 'is', ['x'])).not.toThrow()
+    })
+
+    it('rejects invalid field names in sortAsc / sortDesc / select', () => {
+      expect(() => new ConnectFilter().sortAsc('bad field')).toThrow(ConfigurationError)
+      expect(() => new ConnectFilter().sortDesc('1badstart')).toThrow(ConfigurationError)
+      expect(() => new ConnectFilter().select('ok', 'bad]field')).toThrow(ConfigurationError)
+    })
+  })
+
+  describe('special-character handling in values (issue #52)', () => {
+    it('rejects comma-containing string values for is/not', () => {
+      // "San Francisco, CA" would silently split into ['San Francisco', ' CA']
+      // when the API parses the multi-value list — reject up front.
+      expect(() =>
+        new ConnectFilter().where('city', 'is', ['San Francisco, CA', 'Austin']),
+      ).toThrow(ConfigurationError)
+      expect(() =>
+        new ConnectFilter().where('status', 'not', ['accept,decline']),
+      ).toThrow(ConfigurationError)
+    })
+
+    it('rejects comma-containing values for between', () => {
+      expect(() =>
+        new ConnectFilter().where('range', 'between', ['100,200', '500']),
+      ).toThrow(ConfigurationError)
+    })
+
+    it('accepts ampersand and percent-sign values (URL-encoded by URLSearchParams)', () => {
+      // `&` and `%` in values are safe — URLSearchParams.set() encodes them.
+      // Only commas are structural (the multi-value delimiter).
+      const params = new ConnectFilter()
+        .where('note', 'is', ['100% off & free'])
+        .toParams()
+      expect(params['note[is]']).toBe('100% off & free')
+    })
+
+    it('allows the comma-safe path — single-value ops can contain commas in the value string', () => {
+      // `before`/`after`/etc. take exactly one value; there is no splitting,
+      // so commas in the single value are preserved.
+      const params = new ConnectFilter().where('note', 'gte', 'before,comma').toParams()
+      expect(params['note[gte]']).toBe('before,comma')
+    })
+  })
 })

@@ -6,7 +6,8 @@ export interface ReviewListParams {
   page?: number
   perPage?: number
   _select?: string
-  [key: string]: string | number | boolean | string[] | undefined
+  /** Free-form `field[operator]=value` filter bag. See issue #49 for the `string[]` exclusion rationale. */
+  [key: string]: string | number | boolean | undefined
 }
 
 /**

@@ -34,7 +34,7 @@ describe('HospitableError', () => {
 describe('AuthenticationError', () => {
   it('has correct name and statusCode', () => {
     const err = new AuthenticationError()
-    expect(err.name).toBe('AuthenticationError')
+    expect(err.name).toBe('HospitableAuthError')
     expect(err.statusCode).toBe(401)
     expect(err.message).toBe('Authentication failed')
   })
@@ -55,7 +55,7 @@ describe('AuthenticationError', () => {
 describe('RateLimitError', () => {
   it('has correct name, statusCode, retryAfter, and message', () => {
     const err = new RateLimitError(30)
-    expect(err.name).toBe('RateLimitError')
+    expect(err.name).toBe('HospitableRateLimitError')
     expect(err.statusCode).toBe(429)
     expect(err.retryAfter).toBe(30)
     expect(err.message).toBe('Rate limit exceeded. Retry after 30s')
@@ -76,7 +76,7 @@ describe('RateLimitError', () => {
 describe('NotFoundError', () => {
   it('has correct name and statusCode with defaults', () => {
     const err = new NotFoundError()
-    expect(err.name).toBe('NotFoundError')
+    expect(err.name).toBe('HospitableNotFoundError')
     expect(err.statusCode).toBe(404)
     expect(err.message).toBe('Resource not found')
     expect(err.resource).toBeUndefined()
@@ -99,7 +99,7 @@ describe('NotFoundError', () => {
 describe('ValidationError', () => {
   it('has correct name and statusCode with empty fields default', () => {
     const err = new ValidationError('Invalid input')
-    expect(err.name).toBe('ValidationError')
+    expect(err.name).toBe('HospitableValidationError')
     expect(err.statusCode).toBe(422)
     expect(err.message).toBe('Invalid input')
     expect(err.fields).toEqual({})
@@ -122,7 +122,7 @@ describe('ValidationError', () => {
 describe('ForbiddenError', () => {
   it('has correct name and statusCode with default message', () => {
     const err = new ForbiddenError()
-    expect(err.name).toBe('ForbiddenError')
+    expect(err.name).toBe('HospitableForbiddenError')
     expect(err.statusCode).toBe(403)
     expect(err.message).toBe('Forbidden')
   })
@@ -138,12 +138,35 @@ describe('ForbiddenError', () => {
     expect(err).toBeInstanceOf(HospitableError)
     expect(err).toBeInstanceOf(ForbiddenError)
   })
+
+  it('is instanceof AuthenticationError (AGENTS.md: HospitableAuthError covers 401 and 403)', () => {
+    const err = new ForbiddenError()
+    expect(err).toBeInstanceOf(AuthenticationError)
+  })
+})
+
+describe('HospitableAuthError alias (401/403)', () => {
+  it('catches a 401 AuthenticationError', () => {
+    const err = createErrorFromResponse(401, { message: 'no creds' })
+    expect(err).toBeInstanceOf(AuthenticationError)
+  })
+
+  it('catches a 403 ForbiddenError via AuthenticationError ancestor', () => {
+    // This is the AGENTS.md §Error Handling behavior: a consumer who does
+    //   catch (err) { if (err instanceof HospitableAuthError) ... }
+    // must see 403 caught in that branch. Since HospitableAuthError aliases
+    // AuthenticationError and ForbiddenError extends AuthenticationError,
+    // the 403 path lands here.
+    const err = createErrorFromResponse(403, { message: 'not allowed' })
+    expect(err).toBeInstanceOf(ForbiddenError)
+    expect(err).toBeInstanceOf(AuthenticationError)
+  })
 })
 
 describe('ServerError', () => {
   it('has correct name, statusCode, and attempts', () => {
     const err = new ServerError('Internal error', 500, 3)
-    expect(err.name).toBe('ServerError')
+    expect(err.name).toBe('HospitableServerError')
     expect(err.statusCode).toBe(500)
     expect(err.attempts).toBe(3)
     expect(err.message).toBe('Internal error')

@@ -6,6 +6,15 @@ export interface TokenManagerConfig {
   clientId?: string
   clientSecret?: string
   baseURL: string
+  /**
+   * Seconds until the caller-supplied `token` expires. Only consulted when
+   * both `token` and `refreshToken` are provided (OAuth rehydrate path).
+   * Defaults to 3600 — a conservative "fresh" assumption. Pass the server's
+   * `expires_in` response directly if you have it; pass a small value only
+   * when you know the token is near-expiry and want to force a proactive
+   * refresh on the next request.
+   */
+  expiresIn?: number
 }
 
 interface OAuthTokenResponse {
@@ -31,7 +40,8 @@ export class TokenManager {
     } else if (config.token) {
       this.accessToken = config.token
       this.refreshToken = config.refreshToken
-      this.expiresAt = Date.now() + 60_000
+      const ttlSeconds = config.expiresIn ?? 3600
+      this.expiresAt = Date.now() + ttlSeconds * 1000
     } else {
       const envPat = process.env['HOSPITABLE_API_PAT']
       if (envPat) {

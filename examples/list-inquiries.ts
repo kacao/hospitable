@@ -10,14 +10,16 @@ const filter = new InquiryFilter()
   .include('guest', 'properties')
   .perPage(25)
 
+// AGENTS.md §Safety forbids logging guest PII (names, emails). The outbound
+// message template still uses the real first name because it's being sent to
+// the guest — the log line below masks it so the PII never hits stdout.
 let count = 0
 for await (const inquiry of client.inquiries.iter(filter.toParams())) {
   count++
-  const guestName = `${inquiry.guest.firstName} ${inquiry.guest.lastName}`
   const stay = inquiry.arrivalDate
     ? `${inquiry.arrivalDate} → ${inquiry.departureDate}`
     : 'no dates'
-  console.log(`  ${inquiry.platform}  ${guestName}  ${stay}  (${inquiry.property?.name ?? 'n/a'})`)
+  console.log(`  ${inquiry.platform}  guest:<redacted>  ${stay}  (${inquiry.property?.name ?? 'n/a'})`)
 
   // Example: auto-reply to inquiries with no arrival date (still negotiating)
   if (!inquiry.arrivalDate) {
