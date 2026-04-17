@@ -7,10 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 with the caveat that **while at 0.x, breaking changes land on the minor version**
 (standard npm semver for pre-1.0 libraries).
 
-## [Unreleased]
+## [0.7.1] — 2026-04-17
 
 Post-release review hardening. Fourteen issues opened against the 0.7.0
-audit (`#42`–`#55`) are all resolved on this branch. No Public-API
+audit (`#42`–`#55`) are all resolved in this release. No Public-API
 breaking changes; the Connect surface gains two additions
 (`onTokenExpired`, `verifyWebhookSignature`) and a tightened filter-bag
 type. Error `.name` strings are now the `Hospitable*` spec names — code

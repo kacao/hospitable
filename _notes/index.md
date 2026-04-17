@@ -3,7 +3,7 @@ type: project
 stage: prod
 project: hospitable
 status: active
-updated: 2026-04-16
+updated: 2026-04-17
 tags: [typescript, sdk, hospitable, npm, agent-first, connect-api]
 ---
 
@@ -11,7 +11,9 @@ tags: [typescript, sdk, hospitable, npm, agent-first, connect-api]
 
 TypeScript SDK for both **Hospitable APIs** — the host-facing Public API and the partner-facing Connect API. Single npm package, two client classes, shared transport layer (HTTP, retry, error hierarchy). **Primary consumer: AI agents** — design priorities favor runtime errors with descriptive messages, JSDoc discoverability, and semantic method names (see `decisions/0002-hospitable-sdk-schema-drift-and-agent-first-design.md`).
 
-**Version**: v0.7.0 (released 2026-04-16) — adds full Hospitable Connect API support alongside the existing Public API. New `HospitableConnectClient`, 10 resource classes (28 endpoints), 18 model types, 17 webhook payload types, `ConnectFilter` builder for `field[operator]=value` syntax, and `paginateConnect` helper. Connect types live under a `Connect` namespace to avoid collision with identically-named Public types (`Reservation`, `Review`, `Transaction`, `Payout`). No breaking changes to the Public surface. See `CHANGELOG.md` for the complete additions list.
+**Version**: v0.7.1 (released 2026-04-17) — post-release review hardening. Fourteen issues opened against the 0.7.0 audit (`#42`–`#55`) all resolved. Notable additions: `HospitableConnectClient.onTokenExpired` (mid-session token rotation), `Connect.verifyWebhookSignature` (HMAC-SHA256 with optional timestamp anti-replay), `TokenManagerConfig.expiresIn` (replaces hardcoded 60s TTL). `ForbiddenError extends AuthenticationError` so `instanceof HospitableAuthError` covers both 401 and 403. Error `.name` strings now report the `Hospitable*` spec aliases. Connect `*ListParams` index signatures tightened (no more `string[]` compile-through). 723 tests, 98% statements / 96% branches / 99% functions / 98% lines coverage.
+
+**0.7.0** (2026-04-16) added full Hospitable Connect API alongside Public. `HospitableConnectClient`, 10 resource classes (28 endpoints), 18 model types, 17 webhook payload types, `ConnectFilter` builder for `field[operator]=value` syntax, `paginateConnect` helper. Connect types live under a `Connect` namespace to avoid collision with identically-named Public types. No breaking changes to the Public surface.
 
 ## Stack
 

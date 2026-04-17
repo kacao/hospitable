@@ -1202,16 +1202,18 @@ Rate limits (both endpoints): **2/minute per target conversation**, **50 per 5 m
 
 Every failure mode is a typed subclass of `HospitableError`. Use `instanceof` for narrowing.
 
-| Class | `statusCode` | Extra fields |
-| --- | --- | --- |
-| `ConfigurationError` | `0` (no HTTP made) | — |
-| `AuthenticationError` | `401` | — |
-| `ForbiddenError` | `403` | — |
-| `NotFoundError` | `404` | `resource?: string` |
-| `ValidationError` | `422` | `fields: Record<string, string[]>` |
-| `RateLimitError` | `429` | `retryAfter: number` (seconds) |
-| `ServerError` | `5xx` | `attempts: number` |
-| `HospitableError` | any | `statusCode: number`, `requestId?: string` (base class) |
+| Class | `HospitableXxx` alias | `statusCode` | `err.name` | Extra fields |
+| --- | --- | --- | --- | --- |
+| `ConfigurationError` | `HospitableConfigurationError` | `0` (no HTTP made) | `'HospitableConfigurationError'` | — |
+| `AuthenticationError` | `HospitableAuthError` | `401` | `'HospitableAuthError'` | — |
+| `ForbiddenError` | `HospitableForbiddenError` | `403` | `'HospitableForbiddenError'` | — |
+| `NotFoundError` | `HospitableNotFoundError` | `404` | `'HospitableNotFoundError'` | `resource?: string` |
+| `ValidationError` | `HospitableValidationError` | `422` | `'HospitableValidationError'` | `fields: Record<string, string[]>` |
+| `RateLimitError` | `HospitableRateLimitError` | `429` | `'HospitableRateLimitError'` | `retryAfter: number` (seconds) |
+| `ServerError` | `HospitableServerError` | `5xx` | `'HospitableServerError'` | `attempts: number` |
+| `HospitableError` | — (base) | any | `'HospitableError'` | `statusCode: number`, `requestId?: string` |
+
+`ForbiddenError extends AuthenticationError`, so `err instanceof HospitableAuthError` catches **both** 401 and 403 per the AGENTS.md spec. The `Hospitable*` aliases are the canonical export names; the short names (e.g. `AuthenticationError`) continue to work for backward compatibility and refer to the same classes.
 
 All subclasses inherit `statusCode` and `requestId`. `ConfigurationError` is thrown **before** any network request is made — used when required params are missing locally (e.g. `reservations.list({})` without `properties`). `statusCode: 0` distinguishes it from HTTP errors in catch blocks.
 
@@ -1500,10 +1502,25 @@ interface HospitableConnectClientConfig {
   baseURL?: string            // Default: 'https://connect.hospitable.com/api/v1'
   retry?: RetryConfig         // Same shape as HospitableClient. Connect rate-limits at 60/min.
   debug?: boolean
+  onTokenExpired?: () =>      // Optional — invoked on 401 to mint a fresh token.
+    | string                  // The SDK swaps it in and transparently retries the
+    | Promise<string>         // failing request. Without this, 401 is terminal.
 }
 ```
 
 Throws `ConfigurationError` when no token is resolvable.
+
+**Rotating tokens mid-session.** Connect's static bearer has no built-in
+refresh loop, so by default a 401 throws `AuthenticationError` and stops.
+For long-running agents that rotate tokens via an external system,
+supply `onTokenExpired`:
+
+```ts
+const connect = new HospitableConnectClient({
+  token: await fetchCurrentToken(),
+  onTokenExpired: async () => fetchFreshToken(),   // runs on 401, sync or async
+})
+```
 
 ### Connect method index
 
@@ -1592,9 +1609,57 @@ function handle(payload: C.ConnectWebhookPayload) {
 ```
 
 Families: `channel.*`, `listing.*`, `reservation.*`, `review.*`,
-`payout.*`, `transaction.*`. No HMAC signing is available on Connect —
-authenticate the ingress via IP allowlist or a shared secret in the
-webhook URL path.
+`payout.*`, `transaction.*`.
+
+#### Signature verification
+
+The type guards narrow shape only — they do **not** authenticate the
+sender. Verify the HMAC signature on every payload before trusting it;
+anyone who discovers your webhook URL can POST a forged body that
+passes both `isConnectWebhookAction` and `isConnectWebhookFamily`.
+
+```ts
+import { Connect } from 'hospitable'
+
+// Express route — capture the raw body, then verify before parsing.
+app.post(
+  '/webhooks/hospitable',
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    const ok = await Connect.verifyWebhookSignature({
+      rawBody: req.body,
+      signatureHeader: req.header('X-Hospitable-Signature') ?? '',
+      secret: process.env.HOSPITABLE_WEBHOOK_SECRET!,
+    })
+    if (!ok) return res.status(401).end()
+
+    const payload = JSON.parse(new TextDecoder().decode(req.body))
+    // ... route via isConnectWebhookFamily / isConnectWebhookAction ...
+    res.status(200).end()
+  },
+)
+```
+
+Options:
+
+```ts
+interface VerifyWebhookSignatureOptions {
+  rawBody: string | Uint8Array  // Byte-exact; not the parsed JSON.
+  signatureHeader: string       // `algo=…` prefix is stripped automatically.
+  secret: string                // From the Partner Portal webhook registration.
+  algorithm?: 'sha256' | 'sha1' // Default 'sha256'.
+  encoding?: 'hex' | 'base64'   // Default 'hex'.
+  timestamp?: string            // Seconds-since-epoch. Signed payload becomes `${ts}.${body}`.
+  toleranceSeconds?: number     // Max age. Default 300.
+}
+```
+
+Resolves to `true` on a valid signature (and, if `timestamp` is set,
+within tolerance). Resolves to `false` for any mismatch, malformed
+input, or stale payload. **Never throws on mismatch** — returning a
+boolean makes it safe to call on arbitrary inbound bodies without a
+DoS vector. Uses a constant-time comparison, Web Crypto only (no
+`@types/node` required).
 
 ### Namespace layout
 
