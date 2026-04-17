@@ -47,7 +47,13 @@ export class MemoryCache<T> {
   }
 
   has(key: string): boolean {
-    return this.get(key) !== undefined
+    const entry = this.store.get(key)
+    if (!entry) return false
+    if (Date.now() > entry.expiresAt) {
+      this.store.delete(key)
+      return false
+    }
+    return true
   }
 
   delete(key: string): boolean {

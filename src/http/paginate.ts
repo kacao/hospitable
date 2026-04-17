@@ -15,9 +15,9 @@ export async function* paginate<T, P extends { page?: number; perPage?: number }
     for (const item of result.data) {
       yield item
     }
-    lastPage = result.meta.lastPage
+    lastPage = result.meta.lastPage ?? 0
     page++
-  } while (page <= lastPage)
+  } while (page <= lastPage && lastPage > 0)
 }
 
 /**

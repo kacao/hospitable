@@ -7,7 +7,101 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 with the caveat that **while at 0.x, breaking changes land on the minor version**
 (standard npm semver for pre-1.0 libraries).
 
-## [0.6.0] — 2026-04-11
+## [0.7.0] — 2026-04-16
+
+Adds full **Hospitable Connect API** support alongside the existing
+Public API. Connect is the partner-facing surface for multi-customer
+integrations — different base URL (`connect.hospitable.com/api/v1`),
+different auth (static bearer from Partner Portal, no OAuth refresh),
+different rate limit (60 req/min per vendor), different pagination
+shape, and a `field[operator]=value` filter syntax.
+
+No breaking changes to the existing Public-API surface. Everything
+Connect-specific lives under a new `Connect` namespace to avoid
+collisions with identically-named Public types (`Reservation`, `Review`,
+`Transaction`, `Payout`, etc.).
+
+### ✨ Added
+
+- **`HospitableConnectClient`** — new client, constructed with a
+  partner-portal bearer token or the `HOSPITABLE_CONNECT_TOKEN` env var.
+  Throws `ConfigurationError` when no token is available.
+
+- **10 Connect resources** covering all 28 endpoints:
+  - `authCodes.create(input)` — POST `/auth-codes` (5-min magic links
+    for customer channel connection).
+  - `customers.{list, create, get, delete, iter}` — partner-managed
+    customers (end-users of the partner app).
+  - `channels.{list, get, delete, listListings, getListing}` — OTA
+    channel connections per customer.
+  - `listings.{list, get, getImages, getCalendar, updateCalendar, iter}`
+    — customer-scoped listings + pricing/availability calendar
+    (PUT calendar accepts batch day updates).
+  - `reservations.{listByListing, getByListing, listByCustomer,
+    getByCustomer, iterByListing, iterByCustomer}` — both listing- and
+    customer-scoped reservation queries.
+  - `messaging.{listTemplates, getTemplate, send, iterTemplates}` —
+    templated guest messaging (Connect does not accept freeform
+    messages — `send()` requires a `templateId`).
+  - `reviews.{list, iter}` — channel-scoped review queries.
+  - `transactions.{list, get, iter}` (beta) — channel-scoped Airbnb
+    transactions. Pre-2024-01-12 channels must re-auth to access.
+  - `payouts.{list, get, iter}` (beta) — Airbnb payouts with embedded
+    transaction breakdown.
+  - `resolutions.{list, iter}` (beta, in development) — OTA-mediated
+    dispute/claim records.
+
+- **18 Connect model types** exported under `Connect.*`: `AuthCode`,
+  `Customer`, `Channel`, `Listing` (+ `ListingImage`, `ListingCapacity`,
+  `ListingRoomBed`, `ListingRoomDetails`, `ListingDetails`, `ListingFee`,
+  `ListingHouseRules`, `ListingAddress`, `CalendarDay`,
+  `UpdateCalendarDay`), `Reservation` (+ `ReservationStatus`,
+  `ReservationStatusEntry`, `ReservationGuest`, `ReservationGuestCounts`,
+  `ReservationFinancials`, `ReservationFinancialsGuest`,
+  `ReservationFinancialsHost`), `Review` (+ `ReviewDetailedRating`,
+  `ReviewerRole`), `Transaction`, `Payout`, `Resolution`,
+  `MessageTemplate`, `MessagePlaceholder`, `SendMessageInput`,
+  `Financial`, `ConnectPlatform`, `ConnectPaginatedResponse` (+ `Meta`
+  and `Links`).
+
+- **17 Connect webhook payload types** exported under `Connect.*` —
+  a discriminated union on `action` covering every event family:
+  - `ChannelWebhookPayload` — `channel.activated`
+  - `ListingWebhookPayload` — `listing.created`, `listing.changed`,
+    `listing.deactivated`, `listing.reactivated`
+  - `ReservationWebhookPayload` — `reservation.created`,
+    `reservation.changed`
+  - `ReviewWebhookPayload` — `review.created`, `review.submitted`,
+    `review.published`, `review.changed`, `review.expired`,
+    `review.response_submitted`
+  - `PayoutWebhookPayload` — `payout.created`, `payout.changed`
+  - `TransactionWebhookPayload` — `transaction.created`,
+    `transaction.changed`
+  - Plus `isConnectWebhookAction(payload, action)` and
+    `isConnectWebhookFamily(payload, family)` type guards.
+
+- **`ConnectFilter`** builder (exported under `Connect.*`) — fluent,
+  immutable composer for Connect's `field[operator]=value` filter
+  syntax, `sort[asc|desc]=field`, `_select=`, and pagination.
+  Validates operator-vs-value arity (`between` requires two values,
+  `is`/`not` reject empty arrays, single-value ops reject arrays).
+
+- **`paginateConnect`** helper — terminates on `links.next === null`,
+  empty `data`, or `meta.last_page` reached (Connect's `last_page` is
+  inconsistently populated, so we use layered termination).
+
+- **`src/connect/` tree** — isolated subtree mirroring the Public SDK
+  layout (`resources/`, `models/`, `webhooks/`, `client.ts`,
+  `filter.ts`, `paginate.ts`). Reuses the existing `HttpClient`,
+  `ConfigurationError`, and error hierarchy — no code duplication
+  on the transport layer.
+
+### 🧪 Tests
+
+- 14 new Vitest suites under `src/__tests__/connect/` covering every
+  resource, the filter builder, webhook type guards, the Connect
+  paginator, and client construction/env/validation paths.
+
 
 Full parity with the official Hospitable MCP server. 17 new methods
 across 7 resource files close every gap between the SDK and the MCP

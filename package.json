@@ -1,6 +1,6 @@
 {
   "name": "hospitable",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "author": "Khanh Cao <tyrocium@gmail.com>",
   "repository": {
     "type": "git",
@@ -10,7 +10,7 @@
   "bugs": {
     "url": "https://github.com/kacao/hospitable/issues"
   },
-  "description": "TypeScript SDK for the Hospitable Public API",
+  "description": "TypeScript SDK for the Hospitable Public API and Connect API",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",

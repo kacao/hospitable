@@ -106,11 +106,13 @@ export class HttpClient {
         const authHeader = await this.config.getAuthHeader()
 
         const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
           Accept: 'application/json',
           Authorization: authHeader,
           'User-Agent': `hospitable-ts/${VERSION}`,
           ...extraHeaders,
+        }
+        if (body !== undefined) {
+          headers['Content-Type'] = 'application/json'
         }
 
         if (this.config.debug) {

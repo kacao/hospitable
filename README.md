@@ -1462,6 +1462,158 @@ TokenManager, TokenManagerConfig
 sanitize, MemoryCache, cacheKey, CacheConfig
 ```
 
+## Connect API
+
+Hospitable's **Connect API** is a separate, partner-facing surface for
+multi-customer integrations — distinct from the host-facing Public API
+everything above this section covers. Use Connect when you're building
+a vendor app that onboards multiple Hospitable customers through OTA
+channel connections (the auth-code / magic-link flow). Use the Public
+API when a single host has given you a PAT or OAuth2 credentials
+against their own account.
+
+| Aspect | Public API (`HospitableClient`) | Connect API (`HospitableConnectClient`) |
+| --- | --- | --- |
+| Base URL | `https://public.api.hospitable.com` | `https://connect.hospitable.com/api/v1` |
+| Auth | PAT or OAuth2 (with refresh) | Static bearer token from Partner Portal |
+| Primary key | Property UUID | Customer ID → Channel ID → Listing ID |
+| Rate limit | 1000 req/min (most endpoints) | 60 req/min per vendor |
+| Filter syntax | Typed builders (`ReservationFilter`) | `field[operator]=value` via `ConnectFilter` |
+| Webhooks | 8 event types | 17 event types |
+
+### Initialize
+
+```ts
+import { HospitableConnectClient } from 'hospitable'
+
+const connect = new HospitableConnectClient({ token: 'hsc_...' })
+// Or via env:
+// process.env.HOSPITABLE_CONNECT_TOKEN = 'hsc_...'
+// const connect = new HospitableConnectClient()
+```
+
+`HospitableConnectClientConfig`:
+
+```ts
+interface HospitableConnectClientConfig {
+  token?: string              // Partner-portal bearer token. Defaults to $HOSPITABLE_CONNECT_TOKEN.
+  baseURL?: string            // Default: 'https://connect.hospitable.com/api/v1'
+  retry?: RetryConfig         // Same shape as HospitableClient. Connect rate-limits at 60/min.
+  debug?: boolean
+}
+```
+
+Throws `ConfigurationError` when no token is resolvable.
+
+### Connect method index
+
+| Call | Signature | HTTP |
+| --- | --- | --- |
+| `connect.authCodes.create` | `(input: CreateAuthCodeInput) => Promise<AuthCode>` | `POST /auth-codes` |
+| `connect.customers.list` | `(params?) => Promise<ConnectPaginatedResponse<Customer>>` | `GET /customers` |
+| `connect.customers.create` | `(input: CreateCustomerInput) => Promise<Customer>` | `POST /customers` |
+| `connect.customers.get` | `(id: string) => Promise<Customer>` | `GET /customers/{id}` |
+| `connect.customers.delete` | `(id: string) => Promise<void>` | `DELETE /customers/{id}` |
+| `connect.customers.iter` | `(params?) => AsyncGenerator<Customer>` | auto-paginates |
+| `connect.channels.list` | `(customerId: string) => Promise<Channel[]>` | `GET /customers/{c}/channels` |
+| `connect.channels.get` | `(customerId, channelId) => Promise<Channel>` | `GET /customers/{c}/channels/{ch}` |
+| `connect.channels.delete` | `(customerId, channelId) => Promise<void>` | `DELETE /customers/{c}/channels/{ch}` |
+| `connect.channels.listListings` | `(channelId: string) => Promise<Listing[]>` | `GET /channels/{ch}/listings` |
+| `connect.channels.getListing` | `(channelId, listingId) => Promise<Listing>` | `GET /channels/{ch}/listings/{l}` |
+| `connect.listings.list` | `(customerId, params?) => Promise<ConnectPaginatedResponse<Listing>>` | `GET /customers/{c}/listings` |
+| `connect.listings.get` | `(customerId, listingId) => Promise<Listing>` | `GET /customers/{c}/listings/{l}` |
+| `connect.listings.getImages` | `(customerId, listingId) => Promise<ListingImage[]>` | `GET …/listings/{l}/images` |
+| `connect.listings.getCalendar` | `(listingId, { startDate, endDate }) => Promise<CalendarDay[]>` | `GET /listings/{l}/calendar` |
+| `connect.listings.updateCalendar` | `(listingId, days: UpdateCalendarDay[]) => Promise<void>` | `PUT /listings/{l}/calendar` |
+| `connect.reservations.listByListing` | `(listingId, params?) => Promise<ConnectPaginatedResponse<Reservation>>` | `GET /listings/{l}/reservations` |
+| `connect.reservations.getByListing` | `(listingId, reservationId) => Promise<Reservation>` | `GET /listings/{l}/reservations/{r}` |
+| `connect.reservations.listByCustomer` | `(customerId, params?) => Promise<…>` | `GET /customers/{c}/reservations` |
+| `connect.reservations.getByCustomer` | `(customerId, reservationId) => Promise<Reservation>` | `GET /customers/{c}/reservations/{r}` |
+| `connect.messaging.listTemplates` | `(params?) => Promise<ConnectPaginatedResponse<MessageTemplate>>` | `GET /message-templates` |
+| `connect.messaging.getTemplate` | `(templateId) => Promise<MessageTemplate>` | `GET /message-templates/{t}` |
+| `connect.messaging.send` | `(reservationId, { templateId, placeholders? }) => Promise<void>` | `POST /reservations/{r}/messages` |
+| `connect.reviews.list` | `(channelId, params?) => Promise<ConnectPaginatedResponse<Review>>` | `GET /channels/{ch}/reviews` |
+| `connect.transactions.list` | `(channelId, params?) => Promise<…>` *(beta)* | `GET /channels/{ch}/transactions` |
+| `connect.transactions.get` | `(channelId, transactionId) => Promise<Transaction>` *(beta)* | `GET …/transactions/{t}` |
+| `connect.payouts.list` | `(channelId, params?) => Promise<…>` *(beta)* | `GET /channels/{ch}/payouts` |
+| `connect.payouts.get` | `(channelId, payoutId) => Promise<Payout>` *(beta)* | `GET …/payouts/{p}` |
+| `connect.resolutions.list` | `(channelId, params?) => Promise<…>` *(beta)* | `GET /channels/{ch}/resolutions` |
+
+Every list resource also exposes an `iter()` / `iterByListing()` /
+`iterByCustomer()` async generator that auto-paginates via the
+`links.next` chain. Drain with `for await (const x of connect.Y.iter())`.
+
+### Filtering (ConnectFilter)
+
+Connect uses `field[operator]=value` query params instead of named
+params. Compose them with `ConnectFilter`:
+
+```ts
+import { Connect } from 'hospitable'
+
+const params = new Connect.ConnectFilter()
+  .where('city', 'is', ['New York', 'Seattle'])
+  .where('status', 'not', ['deny', 'cancelled'])
+  .where('arrival_date', 'before', '2026-02-01')
+  .sortDesc('arrival_date')
+  .select('id', 'arrival_date', 'financials.host')
+  .perPage(50)
+  .toParams()
+
+await connect.reservations.listByCustomer(customerId, params)
+```
+
+Supported operators: `is`, `not` (multi-value, comma-joined); `lt`,
+`lte`, `gt`, `gte`, `before`, `after` (single value); `between` (exactly
+two values). The builder throws `ConfigurationError` on malformed
+operator/value pairs — no silent server-side failures.
+
+### Webhooks
+
+Connect ships 17 event payloads across 6 families. Each shares an
+envelope `{ id, created, action, version, data }` — return 200 to ack.
+
+```ts
+import type { Connect } from 'hospitable'
+import { Connect as C } from 'hospitable'
+
+// In your webhook handler:
+function handle(payload: C.ConnectWebhookPayload) {
+  if (C.isConnectWebhookFamily(payload, 'reservation')) {
+    // payload is ReservationWebhookPayload here
+    const { data } = payload
+    // data.listing, data.channel, data.customer are embedded
+  }
+
+  if (C.isConnectWebhookAction(payload, 'review.published')) {
+    // payload is ReviewWebhookPayload (specifically review.published)
+  }
+}
+```
+
+Families: `channel.*`, `listing.*`, `reservation.*`, `review.*`,
+`payout.*`, `transaction.*`. No HMAC signing is available on Connect —
+authenticate the ingress via IP allowlist or a shared secret in the
+webhook URL path.
+
+### Namespace layout
+
+Connect types would collide with Public (both surface `Reservation`,
+`Review`, `Transaction`, `Payout`). To disambiguate, Connect lives
+under a `Connect` namespace — the client class is re-exported at the
+top level for ergonomics:
+
+```ts
+// Top-level exports (safe):
+import { HospitableClient, HospitableConnectClient } from 'hospitable'
+
+// Connect-specific types / builders / webhooks:
+import { Connect } from 'hospitable'
+const filter: Connect.ConnectFilter = new Connect.ConnectFilter()
+type Res = Connect.Reservation
+type Wh = Connect.ReservationWebhookPayload
+```
+
 ## License
 
 MIT

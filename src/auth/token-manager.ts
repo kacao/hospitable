@@ -22,6 +22,9 @@ export class TokenManager {
   private refreshPromise: Promise<void> | null = null
 
   constructor(private readonly config: TokenManagerConfig) {
+    if (config.token !== undefined && config.token.length === 0) {
+      throw new Error('token must be a non-empty string')
+    }
     if (config.token && !config.refreshToken && !config.clientId) {
       this.accessToken = config.token
       this.expiresAt = Infinity

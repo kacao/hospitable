@@ -1,7 +1,18 @@
-export const VERSION = '0.6.1'
+export const VERSION = '0.7.0'
 
 export { HospitableClient } from './client'
 export type { HospitableClientConfig, ResourceCacheConfig } from './client'
+
+// Connect API — partner-facing, multi-customer integration surface.
+// Public API types (e.g. Reservation, Review, Transaction) collide with
+// Connect API types of the same name, so Connect lives under a namespace.
+// Usage:
+//   import { HospitableConnectClient, Connect } from 'hospitable'
+//   const connect = new HospitableConnectClient({ token })
+//   const filter = new Connect.ConnectFilter().where('status', 'is', ['accept'])
+export { HospitableConnectClient } from './connect/client'
+export type { HospitableConnectClientConfig } from './connect/client'
+export * as Connect from './connect'
 
 export {
   HospitableError,
