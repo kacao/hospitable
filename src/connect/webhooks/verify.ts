@@ -1,5 +1,3 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
-
 /**
  * Digest algorithm used to compute the HMAC. `sha256` is the default and
  * what Hospitable uses; `sha1` is supported only for legacy compatibility.
@@ -19,11 +17,14 @@ export interface VerifyWebhookSignatureOptions {
    * JSON — the byte-for-byte original is required for the HMAC to match.
    * Most frameworks expose this as `req.rawBody`, `request.body` (when
    * configured for raw), or the result of a `body-parser`-style raw reader.
+   *
+   * Node's `Buffer` is accepted transparently since it extends
+   * `Uint8Array`; the SDK itself doesn't depend on `@types/node`.
    */
-  rawBody: string | Buffer | Uint8Array
+  rawBody: string | Uint8Array
   /**
    * The signature header value received from Hospitable. If the header
-   * contains a `algo=` prefix (e.g. `sha256=abc123…`), it is stripped
+   * contains an `algo=` prefix (e.g. `sha256=abc123…`), it is stripped
    * automatically before comparison.
    */
   signatureHeader: string
@@ -60,26 +61,30 @@ export interface VerifyWebhookSignatureOptions {
  * URL can forge events and trigger arbitrary downstream behavior in your
  * tenant.
  *
- * Returns `true` when the signature is valid and (if supplied) the
- * timestamp is within tolerance. Returns `false` for any mismatch, malformed
- * input, or stale payload. Never throws for signature mismatch — throwing
- * on verification failure invites a DoS where crafted bodies crash the
- * receiver.
+ * Resolves to `true` when the signature is valid and (if supplied) the
+ * timestamp is within tolerance. Resolves to `false` for any mismatch,
+ * malformed input, or stale payload. Never throws for signature mismatch
+ * — throwing on verification failure invites a DoS where crafted bodies
+ * crash the receiver.
  *
- * Uses `crypto.timingSafeEqual` for the comparison to prevent side-channel
- * leaks of the expected signature byte-by-byte.
+ * Uses a constant-time comparison to prevent side-channel leaks of the
+ * expected signature byte-by-byte.
+ *
+ * Implemented via Web Crypto (`globalThis.crypto.subtle`) so the SDK
+ * stays free of `@types/node`. Works on Node 20+ (native) and in any
+ * runtime that ships Web Crypto.
  *
  * @example
  * ```ts
  * // Express route handler — be sure to capture the raw body.
- * app.post('/webhooks/hospitable', express.raw({ type: 'application/json' }), (req, res) => {
- *   const ok = verifyWebhookSignature({
+ * app.post('/webhooks/hospitable', express.raw({ type: 'application/json' }), async (req, res) => {
+ *   const ok = await verifyWebhookSignature({
  *     rawBody: req.body,
  *     signatureHeader: req.header('X-Hospitable-Signature') ?? '',
  *     secret: process.env.HOSPITABLE_WEBHOOK_SECRET!,
  *   })
  *   if (!ok) return res.status(401).end()
- *   const payload = JSON.parse(req.body.toString('utf8'))
+ *   const payload = JSON.parse(new TextDecoder().decode(req.body))
  *   // ... handle payload ...
  *   res.status(200).end()
  * })
@@ -87,7 +92,9 @@ export interface VerifyWebhookSignatureOptions {
  *
  * @see https://developer.hospitable.com/docs/connect-api-docs
  */
-export function verifyWebhookSignature(opts: VerifyWebhookSignatureOptions): boolean {
+export async function verifyWebhookSignature(
+  opts: VerifyWebhookSignatureOptions,
+): Promise<boolean> {
   const {
     rawBody,
     signatureHeader,
@@ -107,34 +114,84 @@ export function verifyWebhookSignature(opts: VerifyWebhookSignatureOptions): boo
     if (ageSeconds > toleranceSeconds) return false
   }
 
-  const bodyBytes = coerceToBuffer(rawBody)
+  const bodyBytes = toBytes(rawBody)
   const signedPayload =
-    timestamp !== undefined
-      ? Buffer.concat([Buffer.from(`${timestamp}.`, 'utf8'), bodyBytes])
-      : bodyBytes
+    timestamp !== undefined ? concatBytes(toBytes(`${timestamp}.`), bodyBytes) : bodyBytes
 
-  const expected = createHmac(algorithm, secret).update(signedPayload).digest()
+  const encoder = new TextEncoder()
+  const keyMaterial = encoder.encode(secret)
+  // Cast to ArrayBuffer: TextEncoder.encode returns Uint8Array<ArrayBufferLike>
+  // in newer TS lib, but Web Crypto's BufferSource requires ArrayBuffer-backed.
+  // The underlying buffer is always ArrayBuffer (never SharedArrayBuffer) in
+  // this code path, so the cast is runtime-safe.
+  const key = await crypto.subtle.importKey(
+    'raw',
+    keyMaterial.buffer as ArrayBuffer,
+    { name: 'HMAC', hash: { name: algorithm === 'sha1' ? 'SHA-1' : 'SHA-256' } },
+    false,
+    ['sign'],
+  )
+  const expected = new Uint8Array(
+    await crypto.subtle.sign('HMAC', key, signedPayload.buffer as ArrayBuffer),
+  )
 
-  // Strip an algo prefix like `sha256=…` that some providers include.
-  // Only strip when the leading segment is a short alphanumeric name
-  // followed by `=` — otherwise a base64 header with padding (`=` chars)
-  // would be incorrectly truncated.
   const prefixMatch = signatureHeader.match(/^[A-Za-z][A-Za-z0-9]{1,15}=(.+)$/)
   const headerValue = prefixMatch ? prefixMatch[1]! : signatureHeader
 
-  let provided: Buffer
-  try {
-    provided = Buffer.from(headerValue, encoding)
-  } catch {
-    return false
-  }
-
+  const provided = decodeSignature(headerValue, encoding)
+  if (provided === null) return false
   if (provided.length !== expected.length) return false
-  return timingSafeEqual(provided, expected)
+  return constantTimeEqual(provided, expected)
 }
 
-function coerceToBuffer(body: string | Buffer | Uint8Array): Buffer {
-  if (typeof body === 'string') return Buffer.from(body, 'utf8')
-  if (Buffer.isBuffer(body)) return body
-  return Buffer.from(body)
+function toBytes(body: string | Uint8Array): Uint8Array {
+  if (typeof body === 'string') return new TextEncoder().encode(body)
+  // Copy into a fresh, tightly-bounded Uint8Array. Node's `Buffer` is a
+  // subclass of Uint8Array but shares an underlying pool across many
+  // Buffer instances — `buf.buffer` can be much larger than the logical
+  // bytes of `buf`, with `byteOffset` / `byteLength` carving out the
+  // slice. `crypto.subtle.sign(..., buf.buffer)` would then sign the
+  // entire pool, producing a wrong HMAC. The copy here normalizes any
+  // input (Buffer or plain Uint8Array) to an exact-length ArrayBuffer.
+  const out = new Uint8Array(body.length)
+  out.set(body)
+  return out
+}
+
+function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const out = new Uint8Array(a.length + b.length)
+  out.set(a, 0)
+  out.set(b, a.length)
+  return out
+}
+
+function decodeSignature(
+  value: string,
+  encoding: WebhookSignatureEncoding,
+): Uint8Array | null {
+  if (encoding === 'hex') {
+    if (value.length === 0 || value.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(value)) {
+      return null
+    }
+    const out = new Uint8Array(value.length / 2)
+    for (let i = 0; i < out.length; i++) {
+      out[i] = parseInt(value.slice(i * 2, i * 2 + 2), 16)
+    }
+    return out
+  }
+  // base64
+  try {
+    const binary = atob(value)
+    const out = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i)
+    return out
+  } catch {
+    return null
+  }
+}
+
+function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a[i]! ^ b[i]!
+  return diff === 0
 }
