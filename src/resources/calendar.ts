@@ -32,16 +32,25 @@ export class CalendarResource {
   }
 
   /**
-   * Apply a batch of per-day calendar updates (price, availability, minStay).
-   * Merges additively — only the fields provided on each `CalendarUpdate` entry
-   * are modified.
+   * Apply a batch of per-day calendar updates (price, availability, minStay,
+   * check-in/out restrictions, notes). Merges additively — only the fields
+   * provided on each `CalendarUpdate` entry are modified.
+   *
+   * `options.note` sets a top-level note applied to every date in `updates`
+   * that doesn't define its own `note`. Pass `null` to clear. Max 512 chars.
    *
    * @see PUT https://public.api.hospitable.com/v2/properties/{id}/calendar
    */
-  async update(propertyId: string, updates: CalendarUpdate[]): Promise<void> {
+  async update(
+    propertyId: string,
+    updates: CalendarUpdate[],
+    options: { note?: string | null } = {},
+  ): Promise<void> {
+    const body: { note?: string | null; dates: CalendarUpdate[] } = { dates: updates }
+    if (options.note !== undefined) body.note = options.note
     await this.http.put<void>(
       `/v2/properties/${encodeURIComponent(propertyId)}/calendar`,
-      { data: updates },
+      body,
     )
   }
 

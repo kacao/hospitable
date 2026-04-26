@@ -34,4 +34,10 @@ export interface CalendarUpdate {
   price?: { amount: number }
   available?: boolean
   minStay?: number
+  /** Block check-in on this date. Useful for enforcing min-stay edges. */
+  closedForCheckin?: boolean
+  /** Block check-out on this date. Useful for enforcing min-stay edges. */
+  closedForCheckout?: boolean
+  /** Per-date note. Pass `null` to clear. Max 512 chars. */
+  note?: string | null
 }

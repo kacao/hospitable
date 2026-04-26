@@ -81,7 +81,7 @@ describe('CalendarResource', () => {
   })
 
   describe('update()', () => {
-    it('calls PUT with { data: updates }', async () => {
+    it('calls PUT with { dates: updates }', async () => {
       vi.mocked(http.put).mockResolvedValue(undefined)
 
       const updates: CalendarUpdate[] = [
@@ -92,8 +92,64 @@ describe('CalendarResource', () => {
       await resource.update('prop-1', updates)
 
       expect(http.put).toHaveBeenCalledWith('/v2/properties/prop-1/calendar', {
-        data: updates,
+        dates: updates,
       })
+    })
+
+    it('passes closedForCheckin, closedForCheckout, and per-date note through unchanged', async () => {
+      vi.mocked(http.put).mockResolvedValue(undefined)
+
+      const updates: CalendarUpdate[] = [
+        {
+          date: '2026-03-01',
+          closedForCheckin: true,
+          closedForCheckout: true,
+          note: 'turnover day — min-stay edge',
+        },
+        { date: '2026-03-02', closedForCheckout: false, note: null },
+      ]
+
+      await resource.update('prop-1', updates)
+
+      expect(http.put).toHaveBeenCalledWith('/v2/properties/prop-1/calendar', {
+        dates: updates,
+      })
+    })
+
+    it('includes top-level note when provided via options.note', async () => {
+      vi.mocked(http.put).mockResolvedValue(undefined)
+
+      const updates: CalendarUpdate[] = [{ date: '2026-03-01', available: false }]
+
+      await resource.update('prop-1', updates, { note: 'Blocked for maintenance' })
+
+      expect(http.put).toHaveBeenCalledWith('/v2/properties/prop-1/calendar', {
+        dates: updates,
+        note: 'Blocked for maintenance',
+      })
+    })
+
+    it('passes top-level note: null through to clear notes', async () => {
+      vi.mocked(http.put).mockResolvedValue(undefined)
+
+      const updates: CalendarUpdate[] = [{ date: '2026-03-01', available: true }]
+
+      await resource.update('prop-1', updates, { note: null })
+
+      expect(http.put).toHaveBeenCalledWith('/v2/properties/prop-1/calendar', {
+        dates: updates,
+        note: null,
+      })
+    })
+
+    it('omits top-level note entirely when options.note is not provided', async () => {
+      vi.mocked(http.put).mockResolvedValue(undefined)
+
+      await resource.update('prop-1', [{ date: '2026-03-01', available: false }])
+
+      const call = vi.mocked(http.put).mock.calls[0]!
+      const body = call[1] as Record<string, unknown>
+      expect('note' in body).toBe(false)
     })
 
     it('throws ValidationError on 422 (invalid update payload)', async () => {

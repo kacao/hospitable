@@ -79,7 +79,7 @@ Every callable surface. Use this as a jump table.
 | `client.messages.listTemplates` | `() => Promise<MessageTemplate[]>` | `GET /v2/message-templates` |
 | `client.messages.sendTemplate` | `(reservationId: string, templateId: string, variables?: Record<string,string>) => Promise<Message>` | `POST /v2/reservations/{id}/messages/template` |
 | `client.calendar.get` | `(propertyId: string, startDate: string, endDate: string) => Promise<CalendarData>` | `GET /v2/properties/{id}/calendar` |
-| `client.calendar.update` | `(propertyId: string, updates: CalendarUpdate[]) => Promise<void>` | `PUT /v2/properties/{id}/calendar` |
+| `client.calendar.update` | `(propertyId: string, updates: CalendarUpdate[], options?: { note?: string \| null }) => Promise<void>` | `PUT /v2/properties/{id}/calendar` |
 | `client.calendar.block` | `(propertyId: string, startDate: string, endDate: string, reason?: string) => Promise<void>` | `POST /v2/properties/{id}/calendar/block` |
 | `client.calendar.unblock` | `(propertyId: string, startDate: string, endDate: string) => Promise<void>` | `POST /v2/properties/{id}/calendar/unblock` |
 | `client.reviews.list` | `(propertyId: string, params?: ReviewListParams) => Promise<ReviewList>` | `GET /v2/properties/{id}/reviews` |
@@ -109,6 +109,14 @@ Every callable surface. Use this as a jump table.
 | `client.knowledgeHub.updateItem` | `(propertyUuid: string, itemId: number, content: string, options?: UpdateKnowledgeHubItemOptions) => Promise<KnowledgeHubItem>` | `PUT /v2/properties/{id}/knowledge-hub` |
 | `client.knowledgeHub.deleteItem` | `(propertyUuid: string, itemId: number) => Promise<void>` | `DELETE /v2/properties/{id}/knowledge-hub` |
 | `client.knowledgeHub.deleteTopic` | `(propertyUuid: string, topicId: number) => Promise<void>` | `DELETE /v2/properties/{id}/knowledge-hub` |
+
+### Not covered
+
+Surfaces that exist in the Hospitable product but are **not** part of the Public or Connect REST API as of 2026-04-25, and therefore have no SDK method. Do not invent paths — calling a guessed endpoint will 404.
+
+| Surface | Status | Notes |
+| --- | --- | --- |
+| Tasks (assign / coordinate / pay teammates) | In-app only — no REST | Shipped in Hospitable app on 2026-03-06. No `tasks` category on `developer.hospitable.com`. Open user request: [feedback.hospitable.com/p/task-based-reminders](https://feedback.hospitable.com/p/task-based-reminders). When the API ships, the SDK will expose `client.tasks` (Public) and/or `connect.tasks` (Connect) following the existing resource-class pattern. |
 
 ## Decision tables
 
@@ -991,10 +999,18 @@ await client.calendar.block('prop-uuid', '2026-07-01', '2026-07-07', 'Owner stay
 await client.calendar.update('prop-uuid', [
   { date: '2026-07-15', price: { amount: 20000 }, available: false },
   { date: '2026-07-16', price: { amount: 22000 }, available: true, minStay: 3 },
-])
+  // Block check-in on a Saturday turnover day to enforce min-stay.
+  { date: '2026-07-18', closedForCheckin: true, note: 'turnover only' },
+  // Clear a previously-set per-date note.
+  { date: '2026-07-19', note: null },
+], { note: 'Blocked for maintenance' })
 ```
 
 Dates are always ISO `YYYY-MM-DD`. `update` merges additively with existing calendar state.
+
+`CalendarUpdate` fields: `date` (required), `price?: { amount }`, `available?`, `minStay?`, `closedForCheckin?`, `closedForCheckout?`, `note?: string | null` (pass `null` to clear, max 512 chars).
+
+The optional third argument `{ note }` sets a top-level note applied to every date in the batch that doesn't define its own `note`. Wire body shape: `{ note?, dates: [...] }` per the Hospitable spec.
 
 ### Respond to unanswered reviews
 

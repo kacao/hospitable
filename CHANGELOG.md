@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 with the caveat that **while at 0.x, breaking changes land on the minor version**
 (standard npm semver for pre-1.0 libraries).
 
+## [0.7.2] — 2026-04-25
+
+### ✨ Added
+
+- **`CalendarUpdate.closedForCheckin`, `CalendarUpdate.closedForCheckout`,
+  `CalendarUpdate.note`** — three optional per-date fields on
+  `client.calendar.update()`. Lets callers block check-in or check-out on
+  specific dates (e.g. min-stay enforcement at gap edges) and attach a
+  per-date note. `note: null` clears a previously-set note. The Hospitable
+  API has supported these since launch; the SDK type was missing them.
+- **`client.calendar.update()` third arg `options.note`** — sets a
+  top-level note applied to every date in the batch that doesn't define
+  its own `note`. `note: null` clears notes. Mirrors the Hospitable spec
+  body shape `{ note?, dates: [...] }`.
+
+### 🐛 Fixed
+
+- **Calendar update body wrapper** — `client.calendar.update()` was
+  serializing the batch as `{ data: [...] }` since the resource was
+  introduced (commit `2034b3c`). The Hospitable spec wraps it as
+  `{ dates: [...] }`. Because the endpoint returns
+  `202 { "status": "accepted" }` regardless of body shape, the
+  mismatch never surfaced as a thrown error — calendar updates were
+  silently no-op'ing. Body shape now matches the canonical curl example
+  in the public docs. **Behavior change**: callers who passed valid
+  updates expecting them to apply will now see them apply.
+
 ## [0.7.1] — 2026-04-17
 
 Post-release review hardening. Fourteen issues opened against the 0.7.0
