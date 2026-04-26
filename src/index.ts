@@ -1,4 +1,4 @@
-export const VERSION = '0.7.1'
+export const VERSION = '0.7.2'
 
 export { HospitableClient } from './client'
 export type { HospitableClientConfig, ResourceCacheConfig } from './client'
