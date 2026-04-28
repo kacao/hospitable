@@ -200,7 +200,7 @@ describe('InquiriesResource', () => {
   describe('get()', () => {
     it('should call GET /v2/inquiries/{uuid} without include when not provided', async () => {
       const inquiry = makeInquiry()
-      vi.mocked(http.get).mockResolvedValue(inquiry)
+      vi.mocked(http.get).mockResolvedValue({ data: inquiry })
 
       const result = await resource.get('6f58fd0a-a9cb-3746-9219-384a156ff7bb')
 
@@ -208,11 +208,11 @@ describe('InquiriesResource', () => {
         '/v2/inquiries/6f58fd0a-a9cb-3746-9219-384a156ff7bb',
         undefined,
       )
-      expect(result).toBe(inquiry)
+      expect(result).toEqual(inquiry)
     })
 
     it('should pass include param when provided', async () => {
-      vi.mocked(http.get).mockResolvedValue(makeInquiry())
+      vi.mocked(http.get).mockResolvedValue({ data: makeInquiry() })
 
       await resource.get('uuid-1', 'guest,properties,messages')
 
@@ -224,12 +224,26 @@ describe('InquiriesResource', () => {
     it('should normalize the fetched inquiry (aliases properties → property)', async () => {
       const property = makeProperty()
       const inquiry = makeInquiry({ properties: property })
-      vi.mocked(http.get).mockResolvedValue(inquiry)
+      vi.mocked(http.get).mockResolvedValue({ data: inquiry })
 
       const result = await resource.get('uuid-1', 'properties')
 
       expect(result.property).toBe(property)
       expect(result.properties).toBe(property)
+    })
+
+    // Regression for the silent envelope-drift bug where `get()` typed the
+    // response as bare `Inquiry` and returned the `{ data: ... }` wrapper
+    // as if it were the resource — leaving `result.id` undefined and
+    // breaking downstream consumers that read it. See GH#57.
+    it('unwraps the { data } envelope so the resource is returned at the top level', async () => {
+      const inquiry = makeInquiry({ id: 'inq-99' })
+      vi.mocked(http.get).mockResolvedValue({ data: inquiry })
+
+      const result = await resource.get('inq-99')
+
+      expect(result.id).toBe('inq-99')
+      expect((result as unknown as { data?: unknown }).data).toBeUndefined()
     })
 
     it('throws NotFoundError on 404', async () => {
@@ -297,7 +311,7 @@ describe('InquiriesResource', () => {
 
     it('should cache get results when cache is enabled', async () => {
       const cachedResource = new InquiriesResource(http, { enabled: true })
-      vi.mocked(http.get).mockResolvedValue(makeInquiry())
+      vi.mocked(http.get).mockResolvedValue({ data: makeInquiry() })
 
       await cachedResource.get('uuid-1')
       await cachedResource.get('uuid-1')

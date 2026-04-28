@@ -86,6 +86,10 @@ export class InquiriesResource {
    * `financials`, `guest`, `properties`, `listings`, `messages`. Note that
    * `messages` is only supported on this endpoint, not on {@link list}.
    *
+   * **Envelope quirk**: unlike the list endpoint, the single-inquiry
+   * response is wrapped in `{data: Inquiry}`. The SDK unwraps it so
+   * callers always receive a bare {@link Inquiry}.
+   *
    * @see GET https://public.api.hospitable.com/v2/inquiries/{uuid}
    * @throws {NotFoundError} on 404 (inquiry does not exist)
    * @throws {HospitableError} on 410 (inquiry has been deleted upstream)
@@ -97,11 +101,11 @@ export class InquiriesResource {
       const cached = this.cache.get(key) as Inquiry | undefined
       if (cached) return cached
     }
-    const result = await this.http.get<Inquiry>(
+    const response = await this.http.get<{ data: Inquiry }>(
       `/v2/inquiries/${encodeURIComponent(uuid)}`,
       include ? { include } : undefined,
     )
-    const normalized = normalizeInquiry(result)
+    const normalized = normalizeInquiry(response.data)
     this.cache?.set(key, normalized)
     return normalized
   }

@@ -130,6 +130,12 @@ export class ReservationsResource {
   /**
    * Fetch a single reservation by UUID.
    *
+   * **Envelope quirk**: unlike the list endpoint, the single-reservation
+   * response is wrapped in `{data: Reservation}`. The SDK unwraps it so
+   * callers always receive a bare {@link Reservation}. Mutating endpoints
+   * ({@link cancel}, {@link create}, {@link update}) wrap their responses
+   * the same way and unwrap identically.
+   *
    * @see GET https://public.api.hospitable.com/v2/reservations/{id}
    * @throws {NotFoundError} on 404
    */
@@ -139,11 +145,11 @@ export class ReservationsResource {
       const cached = this.cache.get(key) as Reservation | undefined
       if (cached) return cached
     }
-    const raw = await this.http.get<Reservation>(
+    const response = await this.http.get<{ data: Reservation }>(
       `/v2/reservations/${encodeURIComponent(id)}`,
       include ? { include } : undefined,
     )
-    const result = normalizeReservation(raw)
+    const result = normalizeReservation(response.data)
     this.cache?.set(key, result)
     return result
   }
@@ -239,11 +245,11 @@ export class ReservationsResource {
    * @see POST https://public.api.hospitable.com/v2/reservations/{uuid}/cancel
    */
   async cancel(uuid: string, initiatedBy: CancelReservationInitiatedBy): Promise<Reservation> {
-    const raw = await this.http.post<Reservation>(
+    const response = await this.http.post<{ data: Reservation }>(
       `/v2/reservations/${encodeURIComponent(uuid)}/cancel`,
       { initiatedBy },
     )
-    return normalizeReservation(raw)
+    return normalizeReservation(response.data)
   }
 
   /**
@@ -252,8 +258,8 @@ export class ReservationsResource {
    * @see POST https://public.api.hospitable.com/v2/reservations
    */
   async create(params: CreateReservationParams): Promise<Reservation> {
-    const raw = await this.http.post<Reservation>('/v2/reservations', params)
-    return normalizeReservation(raw)
+    const response = await this.http.post<{ data: Reservation }>('/v2/reservations', params)
+    return normalizeReservation(response.data)
   }
 
   /**
@@ -262,11 +268,11 @@ export class ReservationsResource {
    * @see PUT https://public.api.hospitable.com/v2/reservations/{uuid}
    */
   async update(uuid: string, params: UpdateReservationParams): Promise<Reservation> {
-    const raw = await this.http.put<Reservation>(
+    const response = await this.http.put<{ data: Reservation }>(
       `/v2/reservations/${encodeURIComponent(uuid)}`,
       params,
     )
-    return normalizeReservation(raw)
+    return normalizeReservation(response.data)
   }
 
   /**
