@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 with the caveat that **while at 0.x, breaking changes land on the minor version**
 (standard npm semver for pre-1.0 libraries).
 
-## [Unreleased]
+## [0.7.3] — 2026-04-28
 
 ### 🐛 Fixed
 
