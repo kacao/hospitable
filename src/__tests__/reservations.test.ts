@@ -265,17 +265,17 @@ describe('ReservationsResource', () => {
   describe('get()', () => {
     it('calls GET /v2/reservations/{id}', async () => {
       const res = makeReservation({ id: 'res-42' })
-      vi.mocked(http.get).mockResolvedValue(res)
+      vi.mocked(http.get).mockResolvedValue({ data: res })
 
       const result = await resource.get('res-42')
 
       expect(http.get).toHaveBeenCalledWith('/v2/reservations/res-42', undefined)
-      expect(result).toBe(res)
+      expect(result).toEqual(res)
     })
 
     it('passes include param when provided', async () => {
       const res = makeReservation()
-      vi.mocked(http.get).mockResolvedValue(res)
+      vi.mocked(http.get).mockResolvedValue({ data: res })
 
       await resource.get('res-1', 'guest,review')
 
@@ -283,6 +283,20 @@ describe('ReservationsResource', () => {
         '/v2/reservations/res-1',
         { include: 'guest,review' },
       )
+    })
+
+    // Regression for the silent envelope-drift bug where `get()` typed the
+    // response as bare `Reservation` and returned the `{ data: ... }`
+    // wrapper as if it were the resource — leaving `result.id` undefined
+    // and breaking downstream NOT NULL inserts. See GH#57.
+    it('unwraps the { data } envelope so the resource is returned at the top level', async () => {
+      const res = makeReservation({ id: 'res-99' })
+      vi.mocked(http.get).mockResolvedValue({ data: res })
+
+      const result = await resource.get('res-99')
+
+      expect(result.id).toBe('res-99')
+      expect((result as unknown as { data?: unknown }).data).toBeUndefined()
     })
   })
 
@@ -438,7 +452,7 @@ describe('ReservationsResource', () => {
   describe('cancel()', () => {
     it('calls POST /v2/reservations/{uuid}/cancel with initiatedBy', async () => {
       const res = makeReservation({ id: 'res-42', status: 'cancelled' })
-      vi.mocked(http.post).mockResolvedValue(res)
+      vi.mocked(http.post).mockResolvedValue({ data: res })
 
       const result = await resource.cancel('res-42', 'host')
 
@@ -455,10 +469,21 @@ describe('ReservationsResource', () => {
           { category: 'Cancelled', status: 'canceled', changedAt: '2026-01-01T00:00:00+00:00' },
         ],
       })
-      vi.mocked(http.post).mockResolvedValue(res)
+      vi.mocked(http.post).mockResolvedValue({ data: res })
 
       const result = await resource.cancel('res-1', 'guest')
       expect(result.statusHistory[0]!.status).toBe('cancelled')
+    })
+
+    // Regression: same envelope-drift class as get() — see GH#57.
+    it('unwraps the { data } envelope from the cancel response', async () => {
+      const res = makeReservation({ id: 'res-77' })
+      vi.mocked(http.post).mockResolvedValue({ data: res })
+
+      const result = await resource.cancel('res-77', 'host')
+
+      expect(result.id).toBe('res-77')
+      expect((result as unknown as { data?: unknown }).data).toBeUndefined()
     })
 
     it('propagates ValidationError on 422', async () => {
@@ -492,7 +517,7 @@ describe('ReservationsResource', () => {
 
     it('calls POST /v2/reservations with params', async () => {
       const res = makeReservation({ id: 'new-res' })
-      vi.mocked(http.post).mockResolvedValue(res)
+      vi.mocked(http.post).mockResolvedValue({ data: res })
 
       const result = await resource.create(createParams)
 
@@ -506,10 +531,21 @@ describe('ReservationsResource', () => {
           { category: 'Accepted', status: 'canceled', changedAt: '2026-01-01T00:00:00+00:00' },
         ],
       })
-      vi.mocked(http.post).mockResolvedValue(res)
+      vi.mocked(http.post).mockResolvedValue({ data: res })
 
       const result = await resource.create(createParams)
       expect(result.statusHistory[0]!.status).toBe('cancelled')
+    })
+
+    // Regression: same envelope-drift class as get() — see GH#57.
+    it('unwraps the { data } envelope from the 201 response', async () => {
+      const res = makeReservation({ id: 'created-id' })
+      vi.mocked(http.post).mockResolvedValue({ data: res })
+
+      const result = await resource.create(createParams)
+
+      expect(result.id).toBe('created-id')
+      expect((result as unknown as { data?: unknown }).data).toBeUndefined()
     })
 
     it('propagates ValidationError on 422', async () => {
@@ -537,7 +573,7 @@ describe('ReservationsResource', () => {
 
     it('calls PUT /v2/reservations/{uuid} with params', async () => {
       const res = makeReservation({ id: 'res-42' })
-      vi.mocked(http.put).mockResolvedValue(res)
+      vi.mocked(http.put).mockResolvedValue({ data: res })
 
       const result = await resource.update('res-42', updateParams)
 
@@ -554,10 +590,21 @@ describe('ReservationsResource', () => {
           { category: 'Cancelled', status: 'canceled', changedAt: '2026-01-01T00:00:00+00:00' },
         ],
       })
-      vi.mocked(http.put).mockResolvedValue(res)
+      vi.mocked(http.put).mockResolvedValue({ data: res })
 
       const result = await resource.update('res-1', updateParams)
       expect(result.statusHistory[0]!.status).toBe('cancelled')
+    })
+
+    // Regression: same envelope-drift class as get() — see GH#57.
+    it('unwraps the { data } envelope from the update response', async () => {
+      const res = makeReservation({ id: 'updated-id' })
+      vi.mocked(http.put).mockResolvedValue({ data: res })
+
+      const result = await resource.update('updated-id', updateParams)
+
+      expect(result.id).toBe('updated-id')
+      expect((result as unknown as { data?: unknown }).data).toBeUndefined()
     })
 
     it('propagates ValidationError on 422', async () => {
@@ -738,6 +785,39 @@ describe('ReservationsResource', () => {
       const secondCall = vi.mocked(http.get).mock.calls[1]!
       const params = secondCall[1] as Record<string, unknown>
       expect(params['page']).toBe(2)
+    })
+  })
+
+  describe('caching', () => {
+    it('should cache list results when cache is enabled', async () => {
+      const cachedResource = new ReservationsResource(http, { enabled: true })
+      vi.mocked(http.get).mockResolvedValue(makeList([]))
+
+      await cachedResource.list({ properties: ['prop-1'] })
+      await cachedResource.list({ properties: ['prop-1'] })
+
+      expect(http.get).toHaveBeenCalledTimes(1)
+    })
+
+    it('should cache get results when cache is enabled', async () => {
+      const cachedResource = new ReservationsResource(http, { enabled: true })
+      vi.mocked(http.get).mockResolvedValue({ data: makeReservation() })
+
+      await cachedResource.get('res-1')
+      await cachedResource.get('res-1')
+
+      expect(http.get).toHaveBeenCalledTimes(1)
+    })
+
+    it('should bypass cache after clearCache()', async () => {
+      const cachedResource = new ReservationsResource(http, { enabled: true })
+      vi.mocked(http.get).mockResolvedValue(makeList([]))
+
+      await cachedResource.list({ properties: ['prop-1'] })
+      cachedResource.clearCache()
+      await cachedResource.list({ properties: ['prop-1'] })
+
+      expect(http.get).toHaveBeenCalledTimes(2)
     })
   })
 })

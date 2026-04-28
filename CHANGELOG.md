@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 with the caveat that **while at 0.x, breaking changes land on the minor version**
 (standard npm semver for pre-1.0 libraries).
 
+## [Unreleased]
+
+### 🐛 Fixed
+
+- **Envelope unwrap drift on single-resource Reservation/Inquiry endpoints**
+  ([GH#57](https://github.com/kacao/hospitable/issues/57)) — five endpoints
+  were typed against the bare resource (`Reservation` / `Inquiry`) and
+  returned the raw `{ data: ... }` envelope to callers, leaving every
+  top-level field (`id`, `arrivalDate`, etc.) `undefined`. Since the
+  malformed payload deserialized cleanly as `Partial<Resource>`, the bug
+  was silent — downstream consumers reading `result.id` saw `undefined`
+  rather than a thrown error. Other resource `.get()` methods (properties,
+  transactions, payouts, user, calendar, knowledge-hub, listEnrichment,
+  Connect-side everywhere) already unwrapped correctly; this was drift on
+  five sites only:
+  - `client.reservations.get(id)` — `GET /v2/reservations/{id}`
+  - `client.reservations.cancel(uuid, initiatedBy)` — `POST /v2/reservations/{uuid}/cancel`
+  - `client.reservations.create(params)` — `POST /v2/reservations`
+  - `client.reservations.update(uuid, params)` — `PUT /v2/reservations/{uuid}`
+  - `client.inquiries.get(uuid)` — `GET /v2/inquiries/{uuid}`
+
+  **Behavior change**: callers that previously read `result.data?.id` as
+  a workaround will now find `result.data` is undefined; read `result.id`
+  directly. Callers that read `result.id` and saw `undefined` will now
+  see the correct UUID.
+
+  Existing unit tests mocked the *bare* resource shape, so they passed
+  against the broken SDK — that mock-shape drift was itself a bug. Tests
+  now mock the canonical `{ data: ... }` envelope and a regression test
+  per fixed method explicitly asserts `result.id` is populated and
+  `result.data` is absent.
+
+### 🔍 Known but unverified
+
+- `client.reservations.getEnrichment(uuid, key)` and
+  `client.reservations.updateEnrichment(uuid, key, value)` are typed
+  against bare `EnrichmentField` while the sibling `listEnrichment` is
+  enveloped — symmetric inference says these are also drift, but the
+  Hospitable Stoplight bundle does not document the per-key endpoint and
+  no probe script has empirically captured the response shape. Holding
+  the fix until a live-API probe confirms.
+  See [GH#57 follow-up](https://github.com/kacao/hospitable/issues/57).
+
 ## [0.7.2] — 2026-04-25
 
 ### ✨ Added
